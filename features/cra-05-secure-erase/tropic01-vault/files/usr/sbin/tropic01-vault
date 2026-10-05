@@ -1,0 +1,140 @@
+#!/bin/sh
+# tropic01-vault -- a small encrypted data vault whose key lives only in TROPIC01.
+#
+#   status                        what exists and what is open (no chip access)
+#   init                          create the image and a fresh key in the chip (once)
+#   open | close                  unlock and mount / unmount and lock
+#   destroy --yes-destroy-vault   IRREVERSIBLE crypto-erase: erase the key from the
+#                                 chip, then delete the image
+#
+# The key is 32 random bytes from the chip's RNG, kept in one R-MEM slot and never
+# written to flash; while a command runs it exists only as a 0600 file in RAM
+# (/tmp), removed on exit. Without the chip's copy the image cannot be opened.
+# What this does and does not protect is in features/cra-05-secure-erase/README.md.
+# Test hooks: TROPIC01_VAULT_LTUTIL, _CRYPTSETUP, _TMP, _MOUNTS, _DEVMAP, _RETRY_SLEEP.
+# shellcheck disable=SC3043  # 'local' is supported by OpenWrt's busybox ash
+
+LT="${TROPIC01_VAULT_LTUTIL:-lt-util}"
+CS="${TROPIC01_VAULT_CRYPTSETUP:-cryptsetup}"
+TMPDIR_="${TROPIC01_VAULT_TMP:-/tmp}"
+NAME=tropic01-vault
+MOUNTS="${TROPIC01_VAULT_MOUNTS:-/proc/mounts}"
+DEVMAP="${TROPIC01_VAULT_DEVMAP:-/dev/mapper}"
+RETRY_SLEEP="${TROPIC01_VAULT_RETRY_SLEEP:-2}"
+
+uci_get() { uci -q get "tropic01-vault.main.$1" || echo "$2"; }
+MOUNT="$(uci_get mount /vault)"
+IMAGE="$(uci_get image /etc/tropic01/vault.img)"
+SIZE_MB="$(uci_get size_mb 16)"
+SLOT="$(uci_get slot 100)"
+
+log() { logger -t tropic01-vault "$*"; echo "$*" >&2; }
+die() { log "ERROR: $*"; exit 1; }
+
+# 32-byte key file in RAM only; removed on exit.
+KEYFILE="$TMPDIR_/tropic01-vault.key.$$"
+cleanup() { rm -f "$KEYFILE" "$KEYFILE.new"; }
+trap cleanup EXIT
+trap 'exit 1' INT TERM
+
+case "$SLOT" in
+'' | *[!0-9]*) die "slot must be a number" ;;
+esac
+[ "$SLOT" -ge 32 ] && [ "$SLOT" -le 511 ] || die "slot $SLOT is outside the general-purpose R-MEM range 32-511 (1-31 hold factory certificates)"
+
+# One attempt, no retry: for probes whose expected answer is "failed" (an empty slot).
+chip_once() { "$LT" "$@" >/dev/null 2>&1; }
+
+# TROPIC01 allows one SPI session at a time: retry while another user has it.
+chip() {
+	local i=0
+	while [ "$i" -lt 6 ]; do
+		"$LT" "$@" >/dev/null 2>&1 && return 0
+		i=$((i + 1))
+		sleep "$RETRY_SLEEP"
+	done
+	return 1
+}
+
+is_open() { [ -e "$DEVMAP/$NAME" ]; }
+is_mounted() { grep -q " $MOUNT " "$MOUNTS" 2>/dev/null; }
+
+fetch_key() {
+	: > "$KEYFILE" && chmod 600 "$KEYFILE"
+	chip -m -r "$SLOT" "$KEYFILE" || return 1
+	[ "$(wc -c < "$KEYFILE")" -eq 32 ]
+}
+
+case "$1" in
+status)
+	if [ -f "$IMAGE" ]; then echo "image: $IMAGE ($(wc -c < "$IMAGE") bytes)"; else echo "image: none (run: tropic01-vault init)"; fi
+	if is_open; then echo "unlocked: yes"; else echo "unlocked: no"; fi
+	if is_mounted; then echo "mounted: $MOUNT"; else echo "mounted: no"; fi
+	echo "key slot: R-MEM $SLOT (read only on open/destroy)"
+	;;
+init)
+	[ -f "$IMAGE" ] && die "a vault already exists at $IMAGE"
+	# The slot must be empty: never overwrite somebody's data.
+	chip -i || die "TROPIC01 is not reachable (busy or absent)"
+	if chip_once -m -r "$SLOT" "$KEYFILE.probe"; then
+		rm -f "$KEYFILE.probe"
+		die "R-MEM slot $SLOT is not empty -- refusing to touch it"
+	fi
+	rm -f "$KEYFILE.probe"
+	: > "$KEYFILE.new" && chmod 600 "$KEYFILE.new"
+	chip -r 32 "$KEYFILE.new" || die "could not get random bytes from TROPIC01"
+	[ "$(wc -c < "$KEYFILE.new")" -eq 32 ] || die "unexpected key size"
+	# Key into the chip first and read it back: a power cut then leaves a key but
+	# no image (an empty, harmless vault) and never an image without its key.
+	chip -m -s "$SLOT" "$KEYFILE.new" || die "could not store the key in R-MEM slot $SLOT"
+	fetch_key || die "could not read the key back from the chip"
+	cmp -s "$KEYFILE" "$KEYFILE.new" || die "key read back from the chip differs -- not formatting"
+	mkdir -p "$(dirname "$IMAGE")" "$MOUNT"
+	chmod 700 "$(dirname "$IMAGE")"
+	dd if=/dev/zero of="$IMAGE" bs=1M count="$SIZE_MB" 2>/dev/null || die "could not create the image"
+	chmod 600 "$IMAGE"
+	# LUKS2 reserves a 16 MiB header area by default, which would swallow a small image:
+	# keep it to 1 MiB. PBKDF is pointless for a random 32-byte key, so use the minimum.
+	"$CS" luksFormat --type luks2 --pbkdf pbkdf2 --pbkdf-force-iterations 1000 \
+		--luks2-metadata-size 16k --luks2-keyslots-size 256k --offset 2048 \
+		--batch-mode --key-file "$KEYFILE" "$IMAGE" ||
+		{ rm -f "$IMAGE"; die "luksFormat failed"; }
+	"$CS" open --key-file "$KEYFILE" "$IMAGE" "$NAME" || die "open failed"
+	mke2fs -q -t ext4 "$DEVMAP/$NAME" || { "$CS" close "$NAME"; die "mkfs failed"; }
+	mount "$DEVMAP/$NAME" "$MOUNT" || { "$CS" close "$NAME"; die "mount failed"; }
+	chmod 700 "$MOUNT"
+	log "vault created: ${SIZE_MB} MB at $IMAGE, key in R-MEM slot $SLOT, mounted at $MOUNT"
+	;;
+open)
+	[ -f "$IMAGE" ] || die "no vault image ($IMAGE)"
+	is_mounted && { echo "already open"; exit 0; }
+	fetch_key || die "could not read the vault key from TROPIC01 slot $SLOT"
+	is_open || "$CS" open --key-file "$KEYFILE" "$IMAGE" "$NAME" || die "could not unlock the image"
+	mkdir -p "$MOUNT"
+	mount "$DEVMAP/$NAME" "$MOUNT" || { "$CS" close "$NAME"; die "mount failed"; }
+	log "vault unlocked at $MOUNT"
+	;;
+close)
+	is_mounted && umount "$MOUNT"
+	is_open && "$CS" close "$NAME"
+	is_open && die "could not lock the vault"
+	log "vault locked"
+	;;
+destroy)
+	[ "$2" = "--yes-destroy-vault" ] || die "irreversible: pass --yes-destroy-vault to erase the key and delete the vault"
+	is_mounted && umount "$MOUNT"
+	is_open && "$CS" close "$NAME"
+	# Erase the key first: that is what makes the data unrecoverable. Verify it is gone.
+	chip -m -e "$SLOT" || die "could not erase R-MEM slot $SLOT -- the vault is NOT destroyed"
+	if chip_once -m -r "$SLOT" "$KEYFILE.check"; then
+		rm -f "$KEYFILE.check"
+		die "slot $SLOT still returns data after the erase -- the vault is NOT destroyed"
+	fi
+	rm -f "$KEYFILE.check" "$IMAGE"
+	log "vault destroyed: key erased from R-MEM slot $SLOT, image deleted"
+	;;
+*)
+	echo "usage: $0 status|init|open|close|destroy --yes-destroy-vault" >&2
+	exit 2
+	;;
+esac

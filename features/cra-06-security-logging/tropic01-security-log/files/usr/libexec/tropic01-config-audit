@@ -1,0 +1,100 @@
+#!/bin/sh
+# tropic01-config-audit -- log WHICH security-relevant files or service
+# enablements changed, never their contents.
+#
+# There is no inotify on this image, so this polls SHA-256 sums: granularity is
+# the polling interval, and the actor is not known. A change made while this is
+# not running (e.g. across a reboot) is caught by comparing against the
+# baseline stored on flash at the next start.
+#
+# Usage: tropic01-config-audit [interval-seconds]
+# Test hooks: TROPIC01_AUDIT_WATCH, TROPIC01_AUDIT_STATE, TROPIC01_AUDIT_RCD.
+# shellcheck disable=SC3043  # 'local' is supported by OpenWrt's busybox ash
+
+INTERVAL="${1:-30}"
+STATE="${TROPIC01_AUDIT_STATE:-/etc/tropic01/log/baseline.sha256}"
+RCD="${TROPIC01_AUDIT_RCD:-/etc/rc.d}"
+# shellcheck disable=SC2086  # the watch list is a glob list on purpose
+WATCH="${TROPIC01_AUDIT_WATCH:-/etc/config/* /etc/shadow /etc/passwd /etc/group /etc/dropbear/authorized_keys /root/.ssh/authorized_keys /etc/tropic01/pairing.* /etc/rc.local /etc/crontabs/* /etc/sysupgrade.conf /etc/profile.d/* /etc/init.d/*}"
+
+audit() { logger -p authpriv.notice -t tropic01-audit "$* uptime=$(cut -d. -f1 /proc/uptime)s"; }
+
+# "<sha256>  <path>" per file, then one "enabled  <service>" line per rc.d entry
+# (enablement is a symlink, so it would not show up in a content hash). Only the
+# start links (S*) count; the prefix is the start order, not part of the name.
+snapshot() {
+	local f
+	# shellcheck disable=SC2086
+	for f in $WATCH; do
+		[ -f "$f" ] && sha256sum "$f"
+	done
+	for f in "$RCD"/S[0-9][0-9]*; do
+		[ -e "$f" ] && echo "enabled  ${f##*/S[0-9][0-9]}"
+	done
+}
+
+# Print "changed|added|removed <name>" by comparing two snapshots.
+diff_snapshots() {
+	awk -v OLD="$1" -v NEW="$2" '
+		function key(l) { sub(/^[^ ]+  /, "", l); return l }
+		function val(l) { sub(/  .*$/, "", l); return l }
+		BEGIN {
+			while ((getline l < OLD) > 0) { o[key(l)] = val(l) }
+			while ((getline l < NEW) > 0) { n[key(l)] = val(l) }
+			for (k in n) {
+				if (!(k in o)) print "added", k
+				else if (o[k] != n[k]) print "changed", k
+			}
+			for (k in o) if (!(k in n)) print "removed", k
+		}' | sort
+}
+
+# Turn "<changed|added|removed> <name>" lines into audit records. A name that is
+# not an absolute path is a service (an rc.d start link), not a file.
+report() {
+	local prefix="$1" kind name
+	while read -r kind name; do
+		[ -n "$name" ] || continue
+		case "$name" in
+		/*) audit "${prefix}config $kind $name" ;;
+		*)
+			case "$kind" in
+			added) audit "${prefix}service enabled $name" ;;
+			removed) audit "${prefix}service disabled $name" ;;
+			esac
+			;;
+		esac
+	done
+}
+
+mkdir -p "$(dirname "$STATE")"
+cur="$(mktemp)" || exit 1
+trap 'rm -f "$cur"' EXIT
+# A trap that only cleans up would let the loop carry on after procd's SIGTERM.
+trap 'exit 0' INT TERM
+
+snapshot > "$cur"
+if [ -s "$STATE" ]; then
+	# Anything that changed while we were not watching.
+	diff_snapshots "$STATE" "$cur" | report "(while not running) "
+else
+	audit "config baseline recorded ($(wc -l < "$cur") entries)"
+fi
+cp "$cur" "$STATE"
+chmod 600 "$STATE"
+
+while sleep "$INTERVAL"; do
+	snapshot > "$cur"
+	if [ ! -s "$STATE" ]; then
+		# The stored baseline is gone (the user ran `clear`): start over, quietly.
+		cp "$cur" "$STATE"
+		chmod 600 "$STATE"
+		audit "config baseline recorded ($(wc -l < "$cur") entries)"
+		continue
+	fi
+	changes="$(diff_snapshots "$STATE" "$cur")"
+	if [ -n "$changes" ]; then
+		echo "$changes" | report ""
+		cp "$cur" "$STATE"
+	fi
+done

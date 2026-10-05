@@ -1,0 +1,13 @@
+--- a/src/main.c
++++ b/src/main.c
+@@ -55,8 +55,8 @@
+ #define ENGINEERING_SAMPLES_02
+ #endif
+ #if LINUX_SPI
+-// In rare situation (very old devkit) you might need to define ENGINEERING_SAMPLES_01 here
+-#define ENGINEERING_SAMPLES_02
++// Mikroe click boards (TROPIC01-ES) use ENGINEERING_SAMPLES_01 keys
++#define ENGINEERING_SAMPLES_01
+ #endif
+ //#if defined(XXX)
+ //// code for XXX

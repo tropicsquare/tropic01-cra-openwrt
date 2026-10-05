@@ -1,0 +1,11 @@
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -1,4 +1,9 @@
++option('modulesdir',
++  type : 'string',
++  value : '',
++  description : 'Override OpenSSL modules installation directory (default: from pkg-config)')
++
+ option('preload_libasan',
+        type: 'string',
+        value: 'no',

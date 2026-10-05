@@ -1,0 +1,117 @@
+#!/bin/sh
+# tropic01-console-guard -- CRA Annex I 2(b): root must have a real password.
+#
+#   tropic01-console-guard state    print blank | empty | set | unknown
+#   tropic01-console-guard enforce  act on that state (see below)
+#
+# Called by /etc/profile.d/95-tropic01-force-password.sh (interactive logins)
+# and by /etc/init.d/tropic01-console-guard (every boot, after rpcd is up).
+#
+# Why this is more than "is the hash field empty": an empty password stored
+# as a real hash (LuCI's first-login screen can do this, and busybox passwd
+# used to allow it) still looks like a password to any test of the hash
+# field, yet dropbear, rpcd and login accept "". So `state` also asks rpcd,
+# the same verifier LuCI uses, whether "" logs in as root.
+#
+#   blank    shadow hash field empty -- no password at all
+#   empty    hash set, but "" is accepted -- same as no password
+#   set      a password that "" does not unlock (or a locked account)
+#   unknown  hash set but rpcd is not up/installed, so "" could not be tested
+#
+# shellcheck disable=SC3043  # 'local' is supported by OpenWrt's busybox ash
+#
+# Builds carrying /etc/tropic01-dev-build (host-tools/tropic01-gen-test-key.sh)
+# opt out of enforce on purpose.
+
+SHADOW=/etc/shadow
+WARNING_FILE=/etc/banner.tropic01-insecure-default
+
+log() { logger -t tropic01-console-guard "$*"; }
+
+root_hash() { awk -F: '$1=="root"{print $2}' "$SHADOW"; }
+
+state() {
+	local hash out sid
+
+	hash="$(root_hash)"
+	[ -n "$hash" ] || { echo blank; return 0; }
+	case "$hash" in
+	'!'* | '*'*) echo set; return 0 ;;
+	esac
+
+	ubus -t 2 list session >/dev/null 2>&1 || { echo unknown; return 0; }
+	# rejected (or any ubus failure) -> treat as a real password: fail safe,
+	# never blank an account on a doubtful reading.
+	out="$(ubus -t 5 call session login '{"username":"root","password":""}' 2>/dev/null)" ||
+		{ echo set; return 0; }
+	sid="$(echo "$out" | jsonfilter -e '@.ubus_rpc_session' 2>/dev/null)"
+	[ -n "$sid" ] || { echo unknown; return 0; }
+	ubus -t 2 call session destroy "{\"ubus_rpc_session\":\"$sid\"}" >/dev/null 2>&1
+	echo empty
+}
+
+# 95-tropic01-secure-defaults points the dropbear pre-auth banner and the
+# console MOTD at the blank-password warning at first boot. Once a password
+# exists those would be wrong, so take back exactly what it added. Only
+# touches what still matches what it wrote; anything edited since is kept.
+clear_blank_warnings() {
+	local n total
+
+	if [ "$(uci -q get dropbear.@dropbear[0].BannerFile)" = "$WARNING_FILE" ]; then
+		uci -q delete dropbear.@dropbear[0].BannerFile
+		uci commit dropbear
+		/etc/init.d/dropbear reload >/dev/null 2>&1 || true
+	fi
+
+	[ -f "$WARNING_FILE" ] && [ -f /etc/banner ] || return 0
+	n="$(wc -l < "$WARNING_FILE")"
+	total="$(wc -l < /etc/banner)"
+	[ "$n" -gt 0 ] && [ "$total" -gt "$n" ] || return 0
+	if [ "$(tail -n "$n" /etc/banner)" = "$(cat "$WARNING_FILE")" ]; then
+		sed -i "$((total - n + 1)),\$d" /etc/banner
+	fi
+}
+
+# Console login stays "login -f root" (no auth) until ttylogin is set.
+# Recovery from a lost password is OpenWrt failsafe mode. Idempotent.
+enable_console_login() {
+	[ "$(uci -q get system.@system[0].ttylogin)" = 1 ] && return 0
+	if uci set system.@system[0].ttylogin=1 && uci commit system; then
+		log "console login now requires the root password"
+		echo "The serial console now asks for the root password at login."
+	else
+		log "WARNING: could not set system.ttylogin"
+		echo "WARNING: could not enable console login (system.ttylogin); the serial console stays passwordless until this is fixed." >&2
+	fi
+}
+
+enforce() {
+	[ -f /etc/tropic01-dev-build ] && return 0
+
+	case "$(state)" in
+	blank)
+		# Nothing to enforce yet: the login hook prompts for a password.
+		return 0
+		;;
+	empty)
+		# Back to a truly blank hash so the forced-password flow (and
+		# dropbear's refusal of blank passwords) apply again.
+		log "WARNING: root accepts an empty password -- clearing it so a real one must be set"
+		echo "WARNING: root's password is empty. Clearing it; a new one must be set at the next console login." >&2
+		passwd -d root >/dev/null 2>&1 || log "ERROR: could not clear root's empty password"
+		return 0
+		;;
+	esac
+
+	clear_blank_warnings
+	enable_console_login
+}
+
+case "$1" in
+state) state ;;
+enforce) enforce ;;
+*)
+	echo "usage: $0 state|enforce" >&2
+	exit 2
+	;;
+esac

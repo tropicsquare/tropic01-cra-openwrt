@@ -1,0 +1,32 @@
+From: OpenWrt Team <openwrt@openwrt.org>
+Date: Mon, 1 Jan 2026 00:00:00 +0000
+Subject: [PATCH 001] Add -Dmodulesdir meson option
+
+The pkcs11-provider meson build derives the OpenSSL modules install path
+from pkg-config's 'modulesdir' variable.  When cross-compiling, the host
+pkg-config returns the host system path instead of the sysroot path, which
+causes the .so to be installed into the wrong directory (or triggers a
+DESTDIR double-nesting bug).
+
+Add an explicit -Dmodulesdir= meson option so the OpenWrt Makefile can
+pass the correct staging/target directory directly, bypassing pkg-config.
+---
+ meson.build       | 7 ++++++-
+ meson_options.txt | 5 +++++
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+--- a/meson.build
++++ b/meson.build
+@@ -48,7 +48,12 @@ conf.set('PACKAGE_MAJOR', major_version)
+ conf.set('PACKAGE_MINOR', minor_version)
+ 
+ libcrypto = dependency('libcrypto', version: '>= 3.0.7')
+-provider_path = libcrypto.get_variable(pkgconfig: 'modulesdir')
++modulesdir_opt = get_option('modulesdir')
++if modulesdir_opt == ''
++  provider_path = libcrypto.get_variable(pkgconfig: 'modulesdir')
++else
++  provider_path = modulesdir_opt
++endif
+ libssl = dependency('libssl', version: '>= 3.0.7')
+

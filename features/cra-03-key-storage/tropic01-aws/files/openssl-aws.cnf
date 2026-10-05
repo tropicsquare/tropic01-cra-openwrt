@@ -1,0 +1,36 @@
+#
+# OpenSSL configuration for tropic01-aws-pub
+#
+# This file is used ONLY by the tropic01-aws-pub process via
+#   OPENSSL_CONF=/etc/ssl/tropic01-aws/openssl-aws.cnf
+# It does NOT affect the system openssl.cnf or OpenVPN.
+#
+# Key design points:
+#  - pkcs11-provider is activated here so OSSL_STORE_open() can resolve
+#    pkcs11: URIs for ECC slot 1 (AWS IoT private key).
+#  - block-operations = rand: TROPIC01's C_GenerateRandom hangs indefinitely;
+#    blocking it forces OpenSSL to use kernel entropy instead.
+#  - cache-sessions = 1: TROPIC01 supports only one PKCS#11 session at a time;
+#    caching prevents the session-count error (CKR_SESSION_COUNT = 0xB1).
+#
+
+openssl_conf = openssl_init
+
+[openssl_init]
+providers = provider_sect
+
+[provider_sect]
+default = default_sect
+pkcs11  = pkcs11_sect
+
+[default_sect]
+activate = 1
+
+[pkcs11_sect]
+module                          = /usr/lib/ossl-modules/pkcs11.so
+pkcs11-module-path              = /usr/lib/libtropic_pkcs11.so
+pkcs11-module-login-behavior    = always
+pkcs11-module-token-pin         = 0000
+pkcs11-module-cache-sessions    = 1
+pkcs11-module-block-operations  = rand
+activate                        = 1

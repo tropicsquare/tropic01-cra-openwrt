@@ -1,0 +1,125 @@
+#!/bin/sh
+# 95-tropic01-secure-defaults -- CRA Annex I(b) secure-by-default baseline
+#
+# Runs once at first boot (standard /etc/uci-defaults behaviour: OpenWrt
+# executes every script here exactly once during first boot, then removes
+# it -- see /etc/init.d/done). Safe to leave in place if it is ever
+# re-triggered manually: every change below is idempotent.
+#
+# Scope: this script only re-asserts firewall/service-exposure POLICY. It
+# does not generate the default admin credential -- that happens once, at
+# image build / provisioning time, via tropic01-gen-credential.sh, because
+# a first-boot script has no better entropy source than a build-host
+# script already has, and re-running it on every boot would reset a
+# password an installer or owner already changed.
+#
+# See README.md in this feature's folder for the full scope split: attack
+# surface is a policy problem no chip fixes; credential quality and
+# reset-integrity are the actual hardware-adjacent pieces, and only the
+# credential half is implemented so far.
+
+# shellcheck disable=SC1091  # /lib/functions.sh is an OpenWrt runtime file
+# shellcheck disable=SC2329  # these are invoked indirectly via config_foreach
+# shellcheck disable=SC3043  # 'local' is supported by OpenWrt's busybox ash
+. /lib/functions.sh
+
+log() { logger -t tropic01-secure-defaults "$*"; }
+
+harden_zone() {
+	local cfg="$1"
+	local name
+	config_get name "$cfg" name
+	[ "$name" = "wan" ] || return 0
+	uci set firewall."$cfg".input='REJECT'
+	uci set firewall."$cfg".forward='REJECT'
+	log "asserted wan zone ($cfg) input/forward=REJECT"
+}
+
+# Stock allowlist of WAN-facing firewall rules that ship with a default
+# OpenWrt image (see package/network/config/firewall/files/firewall.config
+# upstream). Anything accepting WAN traffic outside this list is drift
+# from the baseline and worth a look -- it is not necessarily wrong (a
+# router that terminates IPsec or VPN traffic needs more), but it should
+# be a deliberate choice, not something nobody remembers adding.
+is_stock_wan_rule() {
+	case "$1" in
+	Allow-DHCP-Renew|Allow-Ping|Allow-IGMP|Allow-DHCPv6|Allow-MLD| \
+	Allow-ICMPv6-Input|Allow-ICMPv6-Forward|Allow-IPSec-ESP|Allow-ISAKMP)
+		return 0
+		;;
+	*)
+		return 1
+		;;
+	esac
+}
+
+check_wan_rule_drift() {
+	local cfg="$1"
+	local name src target
+	config_get name "$cfg" name "(unnamed rule)"
+	config_get src "$cfg" src
+	config_get target "$cfg" target
+	[ "$src" = "wan" ] || return 0
+	[ "$target" = "ACCEPT" ] || return 0
+	is_stock_wan_rule "$name" ||
+		log "WARNING: non-stock WAN-facing ACCEPT rule '$name' -- check package/network/config/firewall/files/firewall.config if this wasn't deliberate"
+}
+
+check_wan_redirect() {
+	local cfg="$1"
+	local name src
+	config_get name "$cfg" name "(unnamed redirect)"
+	config_get src "$cfg" src
+	[ "$src" = "wan" ] || return 0
+	log "WARNING: WAN-facing port redirect '$name' is configured -- confirm this is intentional"
+}
+
+config_load firewall
+config_foreach harden_zone zone
+config_foreach check_wan_rule_drift rule
+config_foreach check_wan_redirect redirect
+
+# Key-only SSH once a key has actually been provisioned. Until then, leave
+# password auth as-is: disabling it before any key exists would lock out
+# an installer who has nothing else to log in with.
+if uci -q get dropbear.@dropbear[0] >/dev/null; then
+	uci set dropbear.@dropbear[0].Interface='lan'
+	log "pinned dropbear to the lan interface"
+
+	if [ -s /etc/dropbear/authorized_keys ]; then
+		uci set dropbear.@dropbear[0].PasswordAuth='off'
+		uci set dropbear.@dropbear[0].RootPasswordAuth='off'
+		log "authorized_keys present -- disabled SSH password login"
+	else
+		log "no authorized_keys yet -- SSH password login stays enabled until a key is provisioned"
+	fi
+fi
+
+# Blank root password is this project's deliberate development default
+# (see docs/cra/compliance-pitfalls.md: a unique per-unit credential,
+# baked in via host-tools/tropic01-gen-credential.sh, is a real fix for
+# Annex I 2(b) credential quality, but it has to happen per-unit before
+# a production unit ships -- it is not something a shared dev/test image
+# can do for itself). Dropbear already refuses a blank password over the
+# network (confirmed: only local/serial console bypasses auth at all),
+# so this isn't an open door -- but it shouldn't be a silent one either.
+root_hash="$(awk -F: '$1=="root"{print $2}' /etc/shadow)"
+if [ -z "$root_hash" ]; then
+	log "WARNING: root has no password set -- CRA Annex I 2(b) credential quality is NOT met on this unit. Run 'passwd', or provision a per-unit credential before this unit ships (see host-tools/tropic01-gen-credential.sh)."
+	if uci -q get dropbear.@dropbear[0] >/dev/null; then
+		uci set dropbear.@dropbear[0].BannerFile='/etc/banner.tropic01-insecure-default'
+		log "pointed dropbear's pre-auth banner at the blank-password warning"
+	fi
+	if [ -f /etc/banner.tropic01-insecure-default ] && [ -f /etc/banner ] &&
+	   ! grep -q "CRA Annex I 2(b)" /etc/banner; then
+		cat /etc/banner.tropic01-insecure-default >> /etc/banner
+		log "appended the blank-password warning to the console MOTD"
+	fi
+fi
+
+uci commit firewall
+uci commit dropbear
+
+log "secure-by-default baseline applied (attack-surface only -- see README.md)"
+
+exit 0

@@ -1,0 +1,57 @@
+# tropic01-usb.ovpn.example
+#
+# OpenVPN client profile — TROPIC01 via USB (hardware PKCS#11 authentication)
+#
+# Copy this file, fill in the placeholders, and deploy it to
+# /etc/openvpn/tropic01-usb.conf on the host.
+#
+# IMPORTANT: Real CA, device certificate, and TLS static key values
+# must NEVER be committed to version control.  Generate them through
+# the provisioning workflow described in TROPIC01_VPN_ROUTER_SETUP.md.
+
+client
+dev tun
+proto udp
+remote <VPN_SERVER_IP> 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+
+remote-cert-tls server
+
+cipher AES-256-GCM
+data-ciphers AES-256-GCM:AES-128-GCM
+auth SHA256
+
+verb 3
+
+# --- CA certificate (VPN server CA) ---
+# Replace with the output of: cat /etc/openvpn/ca.crt
+<ca>
+-----BEGIN CERTIFICATE-----
+<REPLACE_WITH_YOUR_VPN_CA_CERTIFICATE>
+-----END CERTIFICATE-----
+</ca>
+
+# --- Device certificate (issued by the VPN CA) ---
+<cert>
+-----BEGIN CERTIFICATE-----
+<REPLACE_WITH_YOUR_DEVICE_CERTIFICATE>
+-----END CERTIFICATE-----
+</cert>
+
+# --- PKCS#11 hardware key (TROPIC01 via USB) ---
+# Private key lives in TROPIC01 hardware (ECC slot 0) — accessed via PKCS#11.
+# Discover the pkcs11-id with:
+#   openvpn --show-pkcs11-ids /usr/lib/libtropic_pkcs11.so
+pkcs11-providers /usr/lib/libtropic_pkcs11.so
+pkcs11-id 'TropicSquare/TROPIC01\x2DES/<CHIP-SERIAL>/<TOKEN-LABEL>/00'
+
+# --- TLS pre-shared key (HMAC firewall) ---
+# Replace with: cat /etc/openvpn/ta.key
+<tls-crypt>
+-----BEGIN OpenVPN Static key V1-----
+<REPLACE_WITH_YOUR_TLS_STATIC_KEY>
+-----END OpenVPN Static key V1-----
+</tls-crypt>

@@ -1,0 +1,27 @@
+--- a/src/session.c
++++ b/src/session.c
+@@ -748,5 +748,24 @@ static CK_RV fetch_session(P11PROV_SESSI
+         ret = session_new(pool, &session);
+         if (ret == CKR_OK) {
+             found = true;
++        } else if (ret == CKR_SESSION_COUNT && pool->login_session) {
++            /* TROPIC01 and similar single-session tokens report max_sessions=1.
++             * session_new() fails with CKR_SESSION_COUNT because
++             * num_sessions >= max_sessions.  The login_session is already
++             * open and authenticated; reuse it if it is currently idle. */
++            ret = MUTEX_LOCK(pool->login_session);
++            if (ret == CKR_OK) {
++                if (!pool->login_session->in_use) {
++                    P11PROV_debug(
++                        "fetch_session: token max-sessions=1, "
++                        "reusing login_session (handle=0x%lx)",
++                        pool->login_session->session);
++                    pool->login_session->in_use = true;
++                    session = pool->login_session;
++                    found = true;
++                    ret = CKR_OK;
++                }
++                (void)MUTEX_UNLOCK(pool->login_session);
++            }
+         }
+     }

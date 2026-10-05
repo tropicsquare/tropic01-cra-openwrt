@@ -1,0 +1,12 @@
+config PACKAGE_pkcs11-helper
+	bool "pkcs11-helper - PKCS#11 helper library"
+	depends on PACKAGE_libopenssl
+	help
+	  pkcs11-helper makes it easy for application developers to add PKCS#11
+	  support to their software.  It handles dynamic loading of PKCS#11
+	  providers, session and slot management, object enumeration and
+	  sign/decrypt operations needed for TLS client authentication.
+
+	  Required by openvpn_openssl for TROPIC01 PKCS#11 hardware-key support.
+
+	  https://github.com/OpenSC/pkcs11-helper

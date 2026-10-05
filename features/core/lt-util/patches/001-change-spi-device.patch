@@ -1,0 +1,11 @@
+--- a/src/main.c
++++ b/src/main.c
+@@ -1079,7 +1079,7 @@ int main(int argc, char *argv[]) {
+     // This will setup mappings compatible with RPi and our RPi shield.
+     lt_dev_unix_spi_t device = {0};
+     strcpy(device.gpio_dev, "/dev/gpiochip0");
+-    strcpy(device.spi_dev, "/dev/spidev0.0");
++    strcpy(device.spi_dev, "/dev/spidev2.0");
+     device.spi_speed = 1000000; // 1 MHz
+     device.gpio_cs_num = 25;    // GPIO 25 as on RPi shield.
+ 

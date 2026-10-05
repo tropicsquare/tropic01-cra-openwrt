@@ -1,0 +1,138 @@
+#!/bin/sh
+# tropic01-aws-connect — publish a telemetry message to AWS IoT Core
+#
+# TROPIC01 operates in monopoly mode: only one process may hold the SPI bus
+# at a time.  OpenVPN uses ECC slot 0; AWS IoT uses ECC slot 1.  Even though
+# they use different key slots, the underlying SPI session is shared, so they
+# cannot run concurrently.
+#
+# This script:
+#  1. Stops OpenVPN (releases the SPI bus)
+#  2. Runs tropic01-aws-pub (occupies SPI exclusively)
+#  3. Restarts OpenVPN regardless of success/failure
+#
+# Usage:
+#   tropic01-aws-connect [OPTIONS]
+#
+# Options:
+#   --endpoint  <host>    AWS IoT endpoint (e.g. abc123.iot.eu-west-1.amazonaws.com)
+#   --port      <port>    MQTT port (default: 8883)
+#   --root-ca   <file>    Amazon Root CA PEM (default: /etc/ssl/tropic01-aws/AmazonRootCA1.pem)
+#   --cert      <file>    Device certificate PEM (default: /etc/ssl/tropic01-aws/device.pem)
+#   --key-uri   <uri>     PKCS#11 key URI (default: pkcs11:id=%01;type=private)
+#   --client-id <id>      MQTT client ID (default: tropic01-router)
+#   --topic     <topic>   MQTT topic
+#   --payload   <json>    JSON payload (default: auto-generated status)
+#   --no-openvpn          Skip OpenVPN stop/start (for testing without VPN)
+#
+# Exit codes:  0 = published OK,  1 = publish failed,  2 = usage error
+
+OPENSSL_CONF_AWS=/etc/ssl/tropic01-aws/openssl-aws.cnf
+DEFAULT_CA=/etc/ssl/tropic01-aws/AmazonRootCA1.pem
+DEFAULT_CERT=/etc/ssl/tropic01-aws/device.pem
+DEFAULT_KEY_URI="pkcs11:id=%01;type=private"
+DEFAULT_CLIENT_ID="tropic01-router"
+DEFAULT_PORT=8883
+OPENVPN_INIT=/etc/init.d/openvpn
+
+log() { logger -t tropic01-aws "$*"; echo "tropic01-aws-connect: $*"; }
+
+usage() {
+    echo "Usage: tropic01-aws-connect --endpoint <host> --topic <topic> [OPTIONS]"
+    exit 2
+}
+
+# --- Defaults ---
+ENDPOINT=""
+PORT=$DEFAULT_PORT
+CA_FILE=$DEFAULT_CA
+CERT_FILE=$DEFAULT_CERT
+KEY_URI=$DEFAULT_KEY_URI
+CLIENT_ID=$DEFAULT_CLIENT_ID
+TOPIC=""
+PAYLOAD=""
+NO_OPENVPN=0
+
+# --- Parse arguments ---
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --endpoint)   ENDPOINT="$2";   shift 2 ;;
+        --port)       PORT="$2";       shift 2 ;;
+        --root-ca)    CA_FILE="$2";    shift 2 ;;
+        --cert)       CERT_FILE="$2";  shift 2 ;;
+        --key-uri)    KEY_URI="$2";    shift 2 ;;
+        --client-id)  CLIENT_ID="$2";  shift 2 ;;
+        --topic)      TOPIC="$2";      shift 2 ;;
+        --payload)    PAYLOAD="$2";    shift 2 ;;
+        --no-openvpn) NO_OPENVPN=1;    shift   ;;
+        *) echo "Unknown option: $1"; usage ;;
+    esac
+done
+
+[ -z "$ENDPOINT" ] && { echo "Error: --endpoint is required"; usage; }
+[ -z "$TOPIC" ]    && { echo "Error: --topic is required"; usage; }
+
+# --- Auto-generate payload if not provided ---
+if [ -z "$PAYLOAD" ]; then
+    TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    PAYLOAD="{\"ts\":\"$TS\",\"source\":\"tropic01-aws\",\"key_slot\":1}"
+fi
+
+# --- Validate prerequisites ---
+if [ ! -f "$CA_FILE" ]; then
+    log "ERROR: Amazon Root CA not found: $CA_FILE"
+    log "Run: tropic01-aws-provision to set up certificates"
+    exit 1
+fi
+if [ ! -f "$CERT_FILE" ]; then
+    log "ERROR: Device certificate not found: $CERT_FILE"
+    log "Run: tropic01-aws-provision to set up certificates"
+    exit 1
+fi
+if [ ! -x "$(command -v tropic01-aws-pub)" ]; then
+    log "ERROR: tropic01-aws-pub binary not found"
+    exit 1
+fi
+
+OPENVPN_WAS_RUNNING=0
+
+# --- Stop OpenVPN to release TROPIC01 SPI bus ---
+if [ "$NO_OPENVPN" = "0" ] && [ -f "$OPENVPN_INIT" ]; then
+    if pidof openvpn >/dev/null 2>&1; then
+        OPENVPN_WAS_RUNNING=1
+        log "Stopping OpenVPN to release TROPIC01 SPI bus"
+        "$OPENVPN_INIT" stop
+        # Wait for SPI to be fully released
+        sleep 2
+    fi
+fi
+
+# --- Run AWS IoT publisher ---
+log "Publishing to AWS IoT: endpoint=$ENDPOINT topic=$TOPIC"
+
+OPENSSL_CONF="$OPENSSL_CONF_AWS" \
+    tropic01-aws-pub \
+        "$ENDPOINT" \
+        "$PORT" \
+        "$CA_FILE" \
+        "$CERT_FILE" \
+        "$KEY_URI" \
+        "$CLIENT_ID" \
+        "$TOPIC" \
+        "$PAYLOAD"
+PUB_RC=$?
+
+if [ "$PUB_RC" = "0" ]; then
+    log "Published successfully"
+    date -u +"%Y-%m-%dT%H:%M:%SZ" > /tmp/tropic01-aws-last-pub
+else
+    log "Publish failed (rc=$PUB_RC)"
+fi
+
+# --- Restart OpenVPN regardless of publish result ---
+if [ "$OPENVPN_WAS_RUNNING" = "1" ] && [ -f "$OPENVPN_INIT" ]; then
+    log "Restarting OpenVPN"
+    "$OPENVPN_INIT" start
+fi
+
+exit $PUB_RC

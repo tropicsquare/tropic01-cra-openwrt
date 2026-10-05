@@ -1,0 +1,187 @@
+--- libtropic-pkcs11-0.1.0/src/pkcs11.c.orig
++++ libtropic-pkcs11-0.1.0/src/pkcs11.c
+@@ -10,6 +10,7 @@
+ #include <string.h>
+ #include <stdlib.h>
+ #include <inttypes.h>
++#include <syslog.h>
+ 
+ #include "libtropic.h"
+ #include "libtropic_common.h"
+@@ -102,30 +103,117 @@
+  * Logging macros
+  *************************************************************************************************/
+ 
+-#define LT_PKCS11_LOG_DISABLED(...)                             \
++#define LT_PKCS11_LOG_DISABLED(fmt, ...)                       \
+     do {                                                        \
+         if (0) {                                                \
+             /* Validates format string at compile time */       \
+-            printf(__VA_ARGS__);                                \
++            printf(fmt, ##__VA_ARGS__);                         \
+         }                                                       \
+     } while (0)
+ 
++/*
++ * Logging via syslog - messages appear in OpenWrt web UI (LuCI -> System -> Log)
++ *   LT_PKCS11_LOG  - debug-level tracing of all PKCS#11 function calls (LOG_DEBUG)
++ *                    enabled when LT_PKCS11_LOG_EN=1 at build time
++ *   LT_PKCS11_INFO - always-on INFO-level log for important events:
++ *                    module init, device info, session open, signing
++ */
+ #if LT_PKCS11_LOG_EN
+-    #define LT_PKCS11_LOG(...)                                  \
++    #define LT_PKCS11_LOG(fmt, ...)                             \
+         do {                                                    \
+-            printf("%s: ", __func__);                           \
+-            printf(__VA_ARGS__);                                \
+-            printf("\n");                                       \
++            syslog(LOG_DEBUG, "tropic-pkcs11[%s]: " fmt,       \
++                   __func__, ##__VA_ARGS__);                    \
+         } while(0)
+ #else
+-    #define LT_PKCS11_LOG(...) LT_PKCS11_LOG_DISABLED(__VA_ARGS__)
++    #define LT_PKCS11_LOG(fmt, ...) LT_PKCS11_LOG_DISABLED(fmt, ##__VA_ARGS__)
+ #endif
+ 
++/* Always-on INFO log: visible in web UI regardless of LT_PKCS11_LOG_EN */
++#define LT_PKCS11_INFO(fmt, ...) \
++    syslog(LOG_INFO, "tropic-pkcs11: " fmt, ##__VA_ARGS__)
++
++/*
++ * LT_PKCS11_RETURN: log return value and return.
++ * Non-OK returns are also logged at WARNING level unconditionally so errors
++ * are always visible in the web UI log.
++ */
+ #define LT_PKCS11_RETURN(val)                                   \
+-            do {                                                \
+-                LT_PKCS11_LOG(#val);                            \
+-                return val;                                     \
+-            } while (0)
++    do {                                                        \
++        if ((CK_ULONG)(val) != CKR_OK) {                        \
++            syslog(LOG_WARNING,                                 \
++                   "tropic-pkcs11[%s]: => " #val, __func__);   \
++        }                                                       \
++        LT_PKCS11_LOG("=> " #val);                             \
++        return val;                                             \
++    } while (0)
++
++
++/**************************************************************************************************
++ * Device info helper
++ *************************************************************************************************/
++
++/**
++ * @brief Read TROPIC01 chip info and log it to syslog (OpenWrt web UI visible).
++ *
++ * Called once after lt_init() succeeds in C_Initialize.  The L2 transport is
++ * open at that point so lt_get_info_* commands reach the chip without needing
++ * a full secure session.
++ */
++static void lt_pkcs11_log_tropic01_info(lt_handle_t *handle)
++{
++    uint8_t fw_ver[4] = {0};
++    struct lt_chip_id_t chip_id = {0};
++    char model[17] = {0};
++    char serial[15] = {0};
++    lt_ret_t ret;
++
++    /* RISC-V application firmware version */
++    ret = lt_get_info_riscv_fw_ver(handle, fw_ver);
++    if (ret == LT_OK) {
++        LT_PKCS11_INFO("RISC-V firmware v%u.%u.%u.%u",
++                       fw_ver[3], fw_ver[2], fw_ver[1], fw_ver[0]);
++    } else {
++        syslog(LOG_WARNING, "tropic-pkcs11: failed to read RISC-V FW version: %s",
++               lt_ret_verbose(ret));
++    }
++
++    /* SPECT cryptographic co-processor firmware version */
++    ret = lt_get_info_spect_fw_ver(handle, fw_ver);
++    if (ret == LT_OK) {
++        LT_PKCS11_INFO("SPECT firmware v%u.%u.%u.%u",
++                       fw_ver[3], fw_ver[2], fw_ver[1], fw_ver[0]);
++    } else {
++        syslog(LOG_WARNING, "tropic-pkcs11: failed to read SPECT FW version: %s",
++               lt_ret_verbose(ret));
++    }
++
++    /* Chip identity: model, serial number, hardware revision */
++    ret = lt_get_info_chip_id(handle, &chip_id);
++    if (ret == LT_OK) {
++        /* part_num_data is a length-prefixed ASCII string, e.g. "TR01-C2P-T101" */
++        if (chip_id.part_num_data[0] > 0 && chip_id.part_num_data[0] < 16) {
++            uint8_t len = chip_id.part_num_data[0];
++            if (len > 16) len = 16;
++            memcpy(model, &chip_id.part_num_data[1], len);
++        } else {
++            strncpy(model, "TROPIC01", sizeof(model) - 1);
++        }
++        /* Serial: batch_id (5 bytes) + lot_id (2 bytes) = 14 hex chars */
++        snprintf(serial, sizeof(serial), "%02X%02X%02X%02X%02X%02X%02X",
++                 chip_id.batch_id[0], chip_id.batch_id[1], chip_id.batch_id[2],
++                 chip_id.batch_id[3], chip_id.batch_id[4],
++                 chip_id.ser_num.lot_id[0], chip_id.ser_num.lot_id[1]);
++        LT_PKCS11_INFO("chip model=%s serial=%s HW-rev=%u.%u",
++                       model, serial,
++                       chip_id.chip_id_ver[0], chip_id.chip_id_ver[1]);
++    } else {
++        syslog(LOG_WARNING, "tropic-pkcs11: failed to read chip ID: %s",
++               lt_ret_verbose(ret));
++    }
++
++    LT_PKCS11_INFO("interface: SPI %s | GPIO %s | CS-pin %d | speed %d Hz",
++                   TS_SPI_DEV, TS_GPIO_DEV, TS_GPIO_CS_PIN, TS_SPI_SPEED);
++}
+ 
+ 
+ /**************************************************************************************************
+@@ -164,6 +252,10 @@
+ 
+     pkcs11_ctx.initialized = CK_TRUE;
+ 
++    /* Announce to syslog - visible in OpenWrt web UI under System -> Log */
++    LT_PKCS11_INFO("module initialized - TROPIC01 secure element providing keys/signing for OpenVPN");
++    lt_pkcs11_log_tropic01_info(&pkcs11_ctx.lt_handle);
++
+     LT_PKCS11_RETURN(CKR_OK);
+ }
+ 
+@@ -431,6 +523,8 @@
+     pkcs11_ctx.session_open = CK_TRUE;
+     *phSession = pkcs11_ctx.session_handle;
+ 
++    LT_PKCS11_INFO("secure session established with TROPIC01 (OpenVPN key operations active)");
++
+     LT_PKCS11_RETURN(CKR_OK);
+ }
+ 
+@@ -1667,6 +1761,8 @@
+     /* Perform signing based on mechanism */
+     if (pkcs11_ctx.sign_mechanism == CKM_ECDSA) {
+         LT_PKCS11_LOG("Signing with ECDSA on slot %u", pkcs11_ctx.sign_key_slot);
++        LT_PKCS11_INFO("ECDSA/P-256 sign: %lu-byte hash -> TROPIC01 key slot %u (private key never leaves chip)",
++                       ulDataLen, pkcs11_ctx.sign_key_slot);
+         /*
+          * CKM_ECDSA: caller passes a pre-computed hash (typically 32-byte SHA-256).
+          * Use lt_ecc_ecdsa_sign_prehash() to send the hash directly to the hardware
+@@ -1691,6 +1787,8 @@
+ 
+     } else {
+         LT_PKCS11_LOG("Signing with EDDSA on slot %u", pkcs11_ctx.sign_key_slot);
++        LT_PKCS11_INFO("EdDSA/Ed25519 sign: %lu-byte message -> TROPIC01 key slot %u (private key never leaves chip)",
++                       ulDataLen, pkcs11_ctx.sign_key_slot);
+         lt_ret_t ret = lt_ecc_eddsa_sign(&pkcs11_ctx.lt_handle,
+                                          (lt_ecc_slot_t)pkcs11_ctx.sign_key_slot,
+                                          pData, (uint16_t)ulDataLen, pSignature);
+@@ -1701,6 +1799,9 @@
+         }
+     }
+ 
++    LT_PKCS11_INFO("signature complete: %d bytes produced by TROPIC01 hardware",
++                   TR01_ECDSA_EDDSA_SIGNATURE_LENGTH);
++
+     /* Clear sign state (operation is complete) */
+     pkcs11_ctx.sign_active = CK_FALSE;
+     pkcs11_ctx.sign_mechanism = 0;

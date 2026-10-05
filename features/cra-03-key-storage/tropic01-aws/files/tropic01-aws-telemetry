@@ -1,0 +1,124 @@
+#!/bin/sh
+# tropic01-aws-telemetry — collect router sensor data and publish to AWS IoT Core
+#
+# Reads:
+#   - CPU temperature         (/sys/class/hwmon/hwmon0 — cpu_thermal)
+#   - WiFi radio temperatures (/sys/class/hwmon/hwmon1 — mt7915_phy0)
+#                             (/sys/class/hwmon/hwmon2 — mt7915_phy1)
+#   - CPU load average        (/proc/loadavg)
+#   - Memory usage            (/proc/meminfo)
+#   - System uptime           (/proc/uptime)
+#   - Network byte counters   (/sys/class/net/eth0/statistics/)
+#
+# Publishes a JSON telemetry payload to the UCI-configured telemetry topic.
+# Uses tropic01-aws-connect to handle the OpenVPN SPI hand-off automatically.
+#
+# Usage:
+#   tropic01-aws-telemetry               # use UCI config
+#   tropic01-aws-telemetry --once        # publish once and exit (same as default)
+#
+# Cron example (every 5 minutes):
+#   */5 * * * * /usr/bin/tropic01-aws-telemetry
+#
+# shellcheck disable=SC3043  # 'local' is supported by OpenWrt's busybox ash
+
+log() { logger -t tropic01-aws-telemetry "$*"; }
+
+# --- Read a hwmon temp input, returned as "57.8" (degrees C) ---
+read_temp_c() {
+    local path="$1"
+    local raw
+    raw=$(cat "$path" 2>/dev/null)
+    [ -z "$raw" ] && echo "null" && return
+    local int=$((raw / 1000))
+    local frac=$(( (raw % 1000) / 100 ))
+    echo "${int}.${frac}"
+}
+
+# --- Find hwmon by name ---
+hwmon_path_by_name() {
+    local want="$1"
+    for h in /sys/class/hwmon/hwmon*; do
+        local name
+        name=$(cat "$h/name" 2>/dev/null)
+        [ "$name" = "$want" ] && echo "$h" && return
+    done
+    echo ""
+}
+
+# --- Sensor collection ---
+CPU_HWMON=$(hwmon_path_by_name "cpu_thermal")
+PHY0_HWMON=$(hwmon_path_by_name "mt7915_phy0")
+PHY1_HWMON=$(hwmon_path_by_name "mt7915_phy1")
+
+CPU_TEMP="null"
+WIFI0_TEMP="null"
+WIFI1_TEMP="null"
+
+[ -n "$CPU_HWMON"  ] && CPU_TEMP=$(read_temp_c  "$CPU_HWMON/temp1_input")
+[ -n "$PHY0_HWMON" ] && WIFI0_TEMP=$(read_temp_c "$PHY0_HWMON/temp1_input")
+[ -n "$PHY1_HWMON" ] && WIFI1_TEMP=$(read_temp_c "$PHY1_HWMON/temp1_input")
+
+# Load average (1m, 5m, 15m)
+read -r LOAD1 LOAD5 LOAD15 _ < /proc/loadavg
+
+# Memory (kB)
+MEM_TOTAL=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+MEM_FREE=$(awk '/^MemFree:/  {print $2}' /proc/meminfo)
+MEM_AVAIL=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
+MEM_USED=$((MEM_TOTAL - MEM_AVAIL))
+
+# Uptime (integer seconds)
+read -r UPTIME_RAW _ < /proc/uptime
+UPTIME_S=${UPTIME_RAW%%.*}
+
+# Network counters (bytes)
+ETH0_RX=$(cat /sys/class/net/eth0/statistics/rx_bytes  2>/dev/null || echo 0)
+ETH0_TX=$(cat /sys/class/net/eth0/statistics/tx_bytes  2>/dev/null || echo 0)
+
+# Timestamp (UTC ISO-8601)
+TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# Build JSON payload — all numeric values are unquoted (valid JSON numbers)
+PAYLOAD=$(cat <<EOF
+{"ts":"$TS","device":"tropic01-router","uptime_s":$UPTIME_S,"cpu_temp_c":$CPU_TEMP,"wifi_phy0_temp_c":$WIFI0_TEMP,"wifi_phy1_temp_c":$WIFI1_TEMP,"load_1m":$LOAD1,"load_5m":$LOAD5,"load_15m":$LOAD15,"mem_total_kb":$MEM_TOTAL,"mem_free_kb":$MEM_FREE,"mem_used_kb":$MEM_USED,"eth0_rx_bytes":$ETH0_RX,"eth0_tx_bytes":$ETH0_TX}
+EOF
+)
+
+# --- Load UCI config ---
+ENDPOINT=$(uci -q get tropic01-aws.main.endpoint)
+if [ -z "$ENDPOINT" ]; then
+    log "ERROR: no endpoint configured (uci set tropic01-aws.main.endpoint=...)"
+    exit 1
+fi
+
+TELEMETRY_TOPIC=$(uci -q get tropic01-aws.main.telemetry_topic)
+[ -z "$TELEMETRY_TOPIC" ] && TELEMETRY_TOPIC="dt/tropic01-router/telemetry/"
+
+CLIENT_ID=$(uci -q get tropic01-aws.main.client_id)
+[ -z "$CLIENT_ID" ] && CLIENT_ID="tropic01-router"
+
+PORT=$(uci -q get tropic01-aws.main.port)
+[ -z "$PORT" ] && PORT="8883"
+
+ROOT_CA=$(uci -q get tropic01-aws.main.root_ca)
+[ -z "$ROOT_CA" ] && ROOT_CA="/etc/ssl/tropic01-aws/AmazonRootCA1.pem"
+
+# --- Publish ---
+log "Publishing telemetry: cpu=${CPU_TEMP}C wifi0=${WIFI0_TEMP}C wifi1=${WIFI1_TEMP}C load=${LOAD1} mem_used=${MEM_USED}kB"
+
+tropic01-aws-connect \
+    --endpoint  "$ENDPOINT" \
+    --port      "$PORT"     \
+    --root-ca   "$ROOT_CA"  \
+    --client-id "$CLIENT_ID" \
+    --topic     "$TELEMETRY_TOPIC" \
+    --payload   "$PAYLOAD"
+
+RC=$?
+if [ "$RC" = "0" ]; then
+    log "Telemetry published OK"
+else
+    log "Telemetry publish FAILED (rc=$RC)"
+fi
+exit $RC

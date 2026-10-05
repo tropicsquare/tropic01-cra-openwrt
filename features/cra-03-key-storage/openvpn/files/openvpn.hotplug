@@ -1,0 +1,13 @@
+#!/bin/sh
+# OpenVPN hotplug handler for interface events
+# Placed in /etc/hotplug.d/iface/20-openvpn
+
+[ "$ACTION" = "ifup" ] || exit 0
+
+# Reload OpenVPN when the interface it depends on comes up.
+# This allows openvpn client instances that have a route directive
+# or bind to a specific interface to be started/restarted after the
+# interface becomes available.
+
+/etc/init.d/openvpn running && /etc/init.d/openvpn reload
+exit 0

@@ -1,0 +1,217 @@
+--- libtropic-pkcs11-0.1.0/src/pkcs11.c.orig	2026-02-28 10:23:25.660689926 +0100
++++ libtropic-pkcs11-0.1.0/src/pkcs11.c	2026-02-28 10:48:52.793334767 +0100
+@@ -43,6 +43,7 @@
+ #define PKCS11_HANDLE_TYPE_RMEM_DATA    0x0001
+ #define PKCS11_HANDLE_TYPE_ECC_PRIVKEY  0x0002
+ #define PKCS11_HANDLE_TYPE_ECC_PUBKEY   0x0003
++#define PKCS11_HANDLE_TYPE_CERT         0x0004 /* R-MEM slots 0-31 = X.509 DER certs for ECC keys */
+ 
+ #define PKCS11_MAKE_HANDLE(type, slot)     (((CK_OBJECT_HANDLE)(type) << 16) | (slot))
+ #define PKCS11_HANDLE_GET_TYPE(h)          (((h) >> 16) & 0xFFFF)
+@@ -60,6 +61,12 @@
+     (PKCS11_HANDLE_GET_TYPE(h) == PKCS11_HANDLE_TYPE_ECC_PUBKEY && \
+      PKCS11_HANDLE_GET_SLOT(h) <= TR01_ECC_SLOT_31)
+ 
++#define PKCS11_IS_VALID_CERT_HANDLE(h) \
++    (PKCS11_HANDLE_GET_TYPE(h) == PKCS11_HANDLE_TYPE_CERT && \
++     PKCS11_HANDLE_GET_SLOT(h) <= TR01_ECC_SLOT_31)
++/* R-MEM slot for ECC slot N cert = N + offset; avoids protected slot 0 on ES01 */
++#define LT_PKCS11_CERT_RMEM_OFFSET 1
++
+ #define TRIM_LENGTH(v, maxlen) ((v < maxlen) ? v : maxlen)
+ 
+ /* Module context - all global state in one place */
+@@ -749,6 +756,102 @@
+                 break;
+             }
+         }
++    } else if (PKCS11_IS_VALID_CERT_HANDLE(hObject)) {
++
++        /* Certificate stored as DER in R-MEM at slot = ecc_slot + offset */
++        uint8_t cert_buf[LT_PKCS11_CUSTOM_R_MEM_DATA_SIZE_MAX];
++        uint16_t cert_size = 0;
++        uint16_t cert_rmem_slot = (uint16_t)slot + LT_PKCS11_CERT_RMEM_OFFSET;
++
++        lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, cert_rmem_slot, cert_buf,
++                                          sizeof(cert_buf), &cert_size);
++        if (ret == LT_L3_R_MEM_DATA_READ_SLOT_EMPTY) {
++            LT_PKCS11_RETURN(CKR_OBJECT_HANDLE_INVALID);
++        }
++        if (ret != LT_OK) {
++            LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
++        }
++
++        for (CK_ULONG i = 0; i < ulCount; i++) {
++            switch (pTemplate[i].type) {
++
++            case CKA_CLASS: {
++                CK_OBJECT_CLASS obj_class = CKO_CERTIFICATE;
++                if (pTemplate[i].pValue == NULL) {
++                    pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
++                } else if (pTemplate[i].ulValueLen >= sizeof(CK_OBJECT_CLASS)) {
++                    memcpy(pTemplate[i].pValue, &obj_class, sizeof(CK_OBJECT_CLASS));
++                    pTemplate[i].ulValueLen = sizeof(CK_OBJECT_CLASS);
++                } else {
++                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
++                    rv = CKR_BUFFER_TOO_SMALL;
++                }
++                break;
++            }
++
++            case CKA_VALUE:
++                if (pTemplate[i].pValue == NULL) {
++                    pTemplate[i].ulValueLen = cert_size;
++                } else if (pTemplate[i].ulValueLen >= cert_size) {
++                    memcpy(pTemplate[i].pValue, cert_buf, cert_size);
++                    pTemplate[i].ulValueLen = cert_size;
++                } else {
++                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
++                    rv = CKR_BUFFER_TOO_SMALL;
++                }
++                break;
++
++            case CKA_ID: {
++                uint8_t id = (uint8_t)slot;
++                if (pTemplate[i].pValue == NULL) {
++                    pTemplate[i].ulValueLen = sizeof(id);
++                } else if (pTemplate[i].ulValueLen >= sizeof(id)) {
++                    memcpy(pTemplate[i].pValue, &id, sizeof(id));
++                    pTemplate[i].ulValueLen = sizeof(id);
++                } else {
++                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
++                    rv = CKR_BUFFER_TOO_SMALL;
++                }
++                break;
++            }
++
++            case CKA_LABEL: {
++                char label[4];
++                snprintf(label, sizeof(label), "%u", slot);
++                CK_ULONG label_len = strlen(label);
++                if (pTemplate[i].pValue == NULL) {
++                    pTemplate[i].ulValueLen = label_len;
++                } else if (pTemplate[i].ulValueLen >= label_len) {
++                    memcpy(pTemplate[i].pValue, label, label_len);
++                    pTemplate[i].ulValueLen = label_len;
++                } else {
++                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
++                    rv = CKR_BUFFER_TOO_SMALL;
++                }
++                break;
++            }
++
++            case CKA_TOKEN: {
++                CK_BBOOL on_token = CK_TRUE;
++                if (pTemplate[i].pValue == NULL) {
++                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
++                } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
++                    memcpy(pTemplate[i].pValue, &on_token, sizeof(CK_BBOOL));
++                    pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
++                } else {
++                    pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
++                    rv = CKR_BUFFER_TOO_SMALL;
++                }
++                break;
++            }
++
++            default:
++                pTemplate[i].ulValueLen = CK_UNAVAILABLE_INFORMATION;
++                rv = CKR_ATTRIBUTE_TYPE_INVALID;
++                break;
++            }
++        }
++
+     } else if (PKCS11_IS_VALID_ECC_PRIV_HANDLE(hObject) ||
+                PKCS11_IS_VALID_ECC_PUB_HANDLE(hObject)) {
+ 
+@@ -1180,6 +1283,7 @@
+ 
+     CK_BBOOL search_rmem = CK_FALSE;
+     CK_BBOOL search_ecc = CK_FALSE;
++    CK_BBOOL search_cert = CK_FALSE;
+ 
+     if (pkcs11_ctx.find_class_set == CK_TRUE) {
+         if (pkcs11_ctx.find_class == CKO_PRIVATE_KEY ||
+@@ -1187,14 +1291,52 @@
+             search_ecc = CK_TRUE;
+         } else if (pkcs11_ctx.find_class == CKO_DATA) {
+             search_rmem = CK_TRUE;
++        } else if (pkcs11_ctx.find_class == CKO_CERTIFICATE) {
++            search_cert = CK_TRUE;
+         }
+     } else {
+         search_ecc = CK_TRUE;
+         search_rmem = CK_TRUE;
++        search_cert = CK_TRUE;
+     }
+ 
+     LT_PKCS11_LOG("search_ecc:  %d", search_ecc);
+     LT_PKCS11_LOG("search_rmem: %d", search_rmem);
++    LT_PKCS11_LOG("search_cert: %d", search_cert);
++
++    if (search_cert) {
++        uint8_t cert_buf[LT_PKCS11_CUSTOM_R_MEM_DATA_SIZE_MAX];
++        uint16_t cert_size;
++
++        /*
++         * R-MEM slot (ecc_slot + LT_PKCS11_CERT_RMEM_OFFSET) holds DER cert
++         * for ECC key slot ecc_slot. Offset avoids protected slot 0 on ES01.
++         */
++        for (uint8_t ecc_sl = 0; ecc_sl <= TR01_ECC_SLOT_31 &&
++                               *pulObjectCount < ulMaxObjectCount; ecc_sl++) {
++
++            if (pkcs11_ctx.find_slot_set && ecc_sl != (uint8_t)pkcs11_ctx.find_slot) {
++                continue;
++            }
++
++            uint16_t rmem_sl = (uint16_t)ecc_sl + LT_PKCS11_CERT_RMEM_OFFSET;
++            lt_ret_t ret = lt_r_mem_data_read(&pkcs11_ctx.lt_handle, rmem_sl,
++                                              cert_buf, sizeof(cert_buf), &cert_size);
++            if (ret != LT_OK) {
++                continue;
++            }
++
++            /* Verify it looks like a DER certificate (ASN.1 SEQUENCE tag 0x30) */
++            if (cert_size < 4 || cert_buf[0] != 0x30) {
++                continue;
++            }
++
++            phObject[*pulObjectCount] = PKCS11_MAKE_HANDLE(PKCS11_HANDLE_TYPE_CERT, ecc_sl);
++            (*pulObjectCount)++;
++            printf("Found CERTIFICATE in R-Memory slot %u (ecc=%u, handle=0x%lx)\n",
++                   rmem_sl, ecc_sl, phObject[*pulObjectCount - 1]);
++        }
++    }
+ 
+     if (search_rmem) {
+         uint8_t temp_buf[LT_PKCS11_CUSTOM_R_MEM_DATA_SIZE_MAX];
+@@ -1522,12 +1664,25 @@
+     /* Perform signing based on mechanism */
+     if (pkcs11_ctx.sign_mechanism == CKM_ECDSA) {
+         LT_PKCS11_LOG("Signing with ECDSA on slot %u", pkcs11_ctx.sign_key_slot);
+-        lt_ret_t ret = lt_ecc_ecdsa_sign(&pkcs11_ctx.lt_handle,
+-                                         (lt_ecc_slot_t)pkcs11_ctx.sign_key_slot,
+-                                         pData, ulDataLen, pSignature);
++        /*
++         * CKM_ECDSA: caller passes a pre-computed hash (typically 32-byte SHA-256).
++         * Use lt_ecc_ecdsa_sign_prehash() to send the hash directly to the hardware
++         * without the internal SHA-256 step (avoids double-hashing).
++         */
++        lt_ret_t ret;
++        if (ulDataLen == 32) {
++            ret = lt_ecc_ecdsa_sign_prehash(&pkcs11_ctx.lt_handle,
++                                            (lt_ecc_slot_t)pkcs11_ctx.sign_key_slot,
++                                            pData, pSignature);
++        } else {
++            /* Longer data - hash it internally (legacy/non-standard use) */
++            ret = lt_ecc_ecdsa_sign(&pkcs11_ctx.lt_handle,
++                                    (lt_ecc_slot_t)pkcs11_ctx.sign_key_slot,
++                                    pData, ulDataLen, pSignature);
++        }
+ 
+         if (ret != LT_OK) {
+-            LT_PKCS11_LOG("lt_ecc_ecdsa_sign failed with %s", lt_ret_verbose(ret));
++            LT_PKCS11_LOG("lt_ecc_ecdsa_sign(_prehash) failed: %s", lt_ret_verbose(ret));
+             LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
+         }
+ 

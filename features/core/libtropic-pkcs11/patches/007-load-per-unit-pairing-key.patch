@@ -1,0 +1,112 @@
+--- a/src/pkcs11.c
++++ b/src/pkcs11.c
+@@ -11,6 +11,7 @@
+ #include <stdlib.h>
+ #include <inttypes.h>
+ #include <syslog.h>
++#include <unistd.h>
+ 
+ #include "libtropic.h"
+ #include "libtropic_common.h"
+@@ -27,6 +28,73 @@
+ #define LT_PKCS11_SH0_PUB sh0pub_eng_sample
+ 
+ /*
++ * Per-unit pairing key (CRA Annex I 2(d)).
++ *
++ * The macros above are the shared engineering-sample pairing key, identical
++ * on every unit. If the image carries a per-unit key pair, use it instead:
++ *
++ *   /etc/tropic01/pairing.key   32 raw bytes, private X25519 key
++ *   /etc/tropic01/pairing.pub   32 raw bytes, the matching public key
++ *   /etc/tropic01/pairing.slot  pairing-key slot number 0-3
++ *
++ * No key file at all: warn and keep the shared key, so unprovisioned bench
++ * units still work. Key file present but unusable: fail, never fall back
++ * silently to the shared key.
++ */
++#define LT_PKCS11_PAIRING_KEY_FILE  "/etc/tropic01/pairing.key"
++#define LT_PKCS11_PAIRING_PUB_FILE  "/etc/tropic01/pairing.pub"
++#define LT_PKCS11_PAIRING_SLOT_FILE "/etc/tropic01/pairing.slot"
++
++static int lt_pkcs11_read_exact(const char *path, uint8_t *buf, size_t len)
++{
++    FILE *f = fopen(path, "rb");
++    if (!f) {
++        return -1;
++    }
++    size_t n = fread(buf, 1, len, f);
++    int extra = fgetc(f);
++    fclose(f);
++    return (n == len && extra == EOF) ? 0 : -1;
++}
++
++/* 1: per-unit key loaded, 0: none provisioned (shared key stays), -1: provisioned but unusable */
++static int lt_pkcs11_load_pairing_key(uint8_t priv[32], uint8_t pub[32], uint8_t *slot)
++{
++    char slot_txt[8] = {0};
++    int slot_val = -1;
++
++    if (access(LT_PKCS11_PAIRING_KEY_FILE, F_OK) != 0) {
++        syslog(LOG_WARNING, "tropic-pkcs11: no per-unit pairing key (%s), using the shared engineering-sample key",
++               LT_PKCS11_PAIRING_KEY_FILE);
++        return 0;
++    }
++
++    FILE *f = fopen(LT_PKCS11_PAIRING_SLOT_FILE, "r");
++    if (f) {
++        if (fgets(slot_txt, sizeof(slot_txt), f)) {
++            char *end;
++            long v = strtol(slot_txt, &end, 10);
++            if (end != slot_txt && v >= 0 && v <= 3) {
++                slot_val = (int)v;
++            }
++        }
++        fclose(f);
++    }
++
++    if (lt_pkcs11_read_exact(LT_PKCS11_PAIRING_KEY_FILE, priv, 32) != 0 ||
++        lt_pkcs11_read_exact(LT_PKCS11_PAIRING_PUB_FILE, pub, 32) != 0 || slot_val < 0) {
++        syslog(LOG_ERR, "tropic-pkcs11: %s exists but the per-unit key pair is unusable (need 32-byte .key and .pub "
++                        "and a slot 0-3 in .slot); not falling back to the shared key",
++               LT_PKCS11_PAIRING_KEY_FILE);
++        memset(priv, 0, 32);
++        return -1;
++    }
++
++    *slot = (uint8_t)slot_val;
++    return 1;
++}
++
++/*
+  * Define a custom max size of R-Memory slot to keep compatibility among TROPIC01 firmware versions.
+  * For new firmware versions, a few bytes will be unused, this is intentional.
+  */
+@@ -511,8 +579,25 @@
+     }
+ 
+     /* Establish authenticated encrypted session with TROPIC01 */
+-    lt_ret_t ret = lt_verify_chip_and_start_secure_session(&pkcs11_ctx.lt_handle, LT_PKCS11_SH0_PRIV,
+-                    LT_PKCS11_SH0_PUB, TR01_PAIRING_KEY_SLOT_INDEX_0);
++    const uint8_t *sh_priv = LT_PKCS11_SH0_PRIV;
++    const uint8_t *sh_pub = LT_PKCS11_SH0_PUB;
++    uint8_t unit_priv[32] = {0};
++    uint8_t unit_pub[32] = {0};
++    uint8_t pkey_slot = TR01_PAIRING_KEY_SLOT_INDEX_0;
++
++    int unit_key = lt_pkcs11_load_pairing_key(unit_priv, unit_pub, &pkey_slot);
++    if (unit_key < 0) {
++        LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
++    }
++    if (unit_key > 0) {
++        sh_priv = unit_priv;
++        sh_pub = unit_pub;
++        syslog(LOG_INFO, "tropic-pkcs11: using the per-unit pairing key, slot %u", pkey_slot);
++    }
++
++    lt_ret_t ret = lt_verify_chip_and_start_secure_session(&pkcs11_ctx.lt_handle, sh_priv, sh_pub,
++                    (lt_pkey_index_t)pkey_slot);
++    memset(unit_priv, 0, sizeof(unit_priv));
+ 
+     if (ret != LT_OK) {
+         LT_PKCS11_LOG("lt_verify_chip_and_start_secure_session failed with: %s", lt_ret_verbose(ret));

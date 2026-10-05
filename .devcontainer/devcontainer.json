@@ -1,0 +1,26 @@
+{
+	"name": "tropic01-cra-openwrt",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"workspaceFolder": "/work",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/work,type=bind",
+	"remoteUser": "builder",
+	"updateRemoteUserUID": true,
+	"postCreateCommand": "make help",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"timonwong.shellcheck"
+			],
+			"settings": {
+				"files.watcherExclude": {
+					"**/build/**": true
+				},
+				"search.exclude": {
+					"**/build": true
+				}
+			}
+		}
+	}
+}

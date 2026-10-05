@@ -1,0 +1,134 @@
+#!/bin/sh /etc/rc.common
+# /etc/init.d/tropic01-aws
+#
+# procd init script for the TROPIC01 AWS IoT telemetry service.
+#
+# This service does NOT start automatically at boot alongside OpenVPN.
+# TROPIC01 supports only one SPI session; OpenVPN holds the SPI bus
+# at boot (START=90).  This service is intentionally set to START=95
+# but only runs when explicitly called (start/stop/publish).
+#
+# Recommended use cases:
+#   - Scheduled telemetry: add a cron entry to call tropic01-aws-connect
+#   - Manual publish:      service tropic01-aws publish
+#   - UCI-driven config:   /etc/config/tropic01-aws
+#
+# shellcheck disable=SC2034  # START/STOP/USE_PROCD/EXTRA_* read by /etc/rc.common
+# shellcheck disable=SC3043  # 'local' is supported by OpenWrt's busybox ash
+
+START=95
+STOP=05
+
+USE_PROCD=1
+
+CONFIG_FILE=/etc/config/tropic01-aws
+CERT_DIR=/etc/ssl/tropic01-aws
+
+log() { logger -t tropic01-aws "$*"; }
+
+CRON_FILE=/etc/crontabs/root
+CRON_MARKER="# tropic01-aws-telemetry"
+
+_load_config() {
+    AWS_ENDPOINT=""
+    AWS_PORT=8883
+    AWS_TOPIC="dt/tropic01-router/messages/events/"
+    AWS_TELEMETRY_TOPIC="dt/tropic01-router/telemetry/"
+    AWS_TELEMETRY_INTERVAL=300
+    AWS_CLIENT_ID="tropic01-router"
+    AWS_ROOT_CA="$CERT_DIR/AmazonRootCA1.pem"
+    AWS_DEVICE_CERT="$CERT_DIR/device.pem"
+    AWS_KEY_URI="pkcs11:id=%01;type=private"
+
+    if [ -f "$CONFIG_FILE" ]; then
+        config_load tropic01-aws
+        config_get AWS_ENDPOINT           main endpoint           "$AWS_ENDPOINT"
+        config_get AWS_PORT               main port               "$AWS_PORT"
+        config_get AWS_TOPIC              main topic              "$AWS_TOPIC"
+        config_get AWS_TELEMETRY_TOPIC    main telemetry_topic    "$AWS_TELEMETRY_TOPIC"
+        config_get AWS_TELEMETRY_INTERVAL main telemetry_interval "$AWS_TELEMETRY_INTERVAL"
+        config_get AWS_CLIENT_ID          main client_id          "$AWS_CLIENT_ID"
+        config_get AWS_ROOT_CA            main root_ca            "$AWS_ROOT_CA"
+    fi
+}
+
+# --- Install periodic cron job for telemetry ---
+_install_cron() {
+    local interval="$1"
+    local mins=$((interval / 60))
+    [ "$mins" -lt 1 ] && mins=1
+
+    # Remove any existing entry then append new one
+    touch "$CRON_FILE"
+    grep -v "$CRON_MARKER" "$CRON_FILE" > /tmp/.cron.tropic01 2>/dev/null
+    echo "*/$mins * * * * /usr/bin/tropic01-aws-telemetry $CRON_MARKER" >> /tmp/.cron.tropic01
+    mv /tmp/.cron.tropic01 "$CRON_FILE"
+    /etc/init.d/cron restart 2>/dev/null || true
+    log "Telemetry cron job installed (every ${mins} min)"
+}
+
+# --- Remove periodic cron job ---
+_remove_cron() {
+    if [ -f "$CRON_FILE" ]; then
+        grep -v "$CRON_MARKER" "$CRON_FILE" > /tmp/.cron.tropic01 2>/dev/null
+        mv /tmp/.cron.tropic01 "$CRON_FILE"
+        /etc/init.d/cron restart 2>/dev/null || true
+        log "Telemetry cron job removed"
+    fi
+}
+
+start_service() {
+    _load_config
+
+    if [ -z "$AWS_ENDPOINT" ]; then
+        log "AWS endpoint not configured — set it in /etc/config/tropic01-aws"
+        log "Example: uci set tropic01-aws.main.endpoint=abc123.iot.eu-west-1.amazonaws.com"
+        return 0
+    fi
+
+    _install_cron "$AWS_TELEMETRY_INTERVAL"
+    log "AWS IoT endpoint: $AWS_ENDPOINT"
+    log "Telemetry topic: $AWS_TELEMETRY_TOPIC (every ${AWS_TELEMETRY_INTERVAL}s)"
+    log "Use 'service tropic01-aws publish' to publish immediately"
+
+    # No persistent procd instance: scheduling is handled by cron.
+}
+
+stop_service() {
+    _remove_cron
+    log "tropic01-aws service stopped"
+}
+
+# Extra command: publish one telemetry message
+publish() {
+    _load_config
+
+    if [ -z "$AWS_ENDPOINT" ]; then
+        echo "Error: AWS endpoint not configured"
+        echo "  uci set tropic01-aws.main.endpoint=<your-endpoint>"
+        return 1
+    fi
+
+    tropic01-aws-connect \
+        --endpoint  "$AWS_ENDPOINT" \
+        --port      "$AWS_PORT" \
+        --root-ca   "$AWS_ROOT_CA" \
+        --cert      "$AWS_DEVICE_CERT" \
+        --key-uri   "$AWS_KEY_URI" \
+        --client-id "$AWS_CLIENT_ID" \
+        --topic     "$AWS_TOPIC"
+}
+
+status() {
+    tropic01-aws-status
+}
+
+# Run a single sensor telemetry publish immediately
+telemetry() {
+    tropic01-aws-telemetry
+}
+
+EXTRA_COMMANDS="publish telemetry status"
+EXTRA_HELP="        publish    Publish one message to AWS IoT Core (events topic)
+        telemetry  Publish one sensor telemetry snapshot immediately
+        status     Show TROPIC01 AWS IoT provisioning and connection state"

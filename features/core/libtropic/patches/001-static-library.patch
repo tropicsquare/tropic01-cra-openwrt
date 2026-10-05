@@ -1,0 +1,12 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -366,7 +366,7 @@ endif()
+ # Create the library
+ ###########################################################################
+ 
+-add_library(tropic ${SDK_SRCS} ${SDK_INCS})
++add_library(tropic STATIC ${SDK_SRCS} ${SDK_INCS})
+ 
+ target_include_directories(tropic PRIVATE ${SDK_DIRS_PRIV})
+ target_include_directories(tropic PUBLIC ${SDK_DIRS_PUB})
+

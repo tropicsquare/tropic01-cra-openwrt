@@ -1,0 +1,6 @@
+# Upstream OpenWrt revision this repo is built and tested against.
+# Read by both make and POSIX sh: KEY=value, no spaces, no quotes.
+# Bumping this is a deliberate change: rebuild, re-run on-hardware tests,
+# and mention the new revision in the commit message.
+OPENWRT_URL=https://github.com/openwrt/openwrt.git
+OPENWRT_COMMIT=31cdd13d22dd374d4a8b8d86377627ad01928495

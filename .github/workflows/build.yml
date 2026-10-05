@@ -1,0 +1,42 @@
+name: build
+
+# A full OpenWrt build takes hours on hosted runners, so it runs on pull
+# requests into main and on demand -- not on every push.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Cache downloads
+        uses: actions/cache@v4
+        with:
+          path: dl-cache
+          key: dl-${{ hashFiles('openwrt.pin', 'feeds.conf', 'features/**/Makefile') }}
+          restore-keys: dl-
+
+      - name: Build image in the builder container
+        run: |
+          docker build -t builder --build-arg USER_UID=$(id -u) --build-arg USER_GID=$(id -g) .devcontainer
+          docker run --rm -v "$PWD:/work" -w /work builder \
+            make build JOBS=$(nproc) DL_DIR=/work/dl-cache OPENWRT_DIR=/work/build/openwrt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-one-image
+          path: |
+            build/openwrt/bin/targets/mediatek/filogic/*openwrt_one*
+            build/openwrt/bin/targets/mediatek/filogic/*.bom.cdx.json
+          if-no-files-found: error

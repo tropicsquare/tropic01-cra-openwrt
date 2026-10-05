@@ -1,0 +1,49 @@
+# Generated build tree (scripts/prepare.sh)
+/build/
+
+# --- Secrets: never commit ---
+# Per-unit credential manifests from host-tools (plaintext passwords)
+*manifest*.csv
+*.manifest
+# Keys and certificates
+*.key
+*.pem.key
+*.p12
+*.pfx
+private-key.pem
+public-key.pem
+*.pem.crt
+*.csr
+# Filled-in VPN profiles (the committed templates end in .example)
+*.ovpn
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*~
+*.orig
+*.rej
+.vscode/
+.idea/
+.trunk/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Internal / local-only: assistant state, plans, scratch, logs, bench captures
+# (the shared .claude/skills/ and CLAUDE.md files ARE committed)
+.claude/settings.local.json
+.claude/plans/
+.claude/scratch/
+CLAUDE.local.md
+NEXT-STEPS.md
+HANDOFF*.md
+*-handoff*.md
+*field-report*
+*hardware-findings*
+scratch/
+tmp/
+*.log
+*.serial.txt
+.cache/

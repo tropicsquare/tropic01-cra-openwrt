@@ -1,0 +1,12 @@
+#!/bin/sh /etc/rc.common
+# Runs the console guard on every boot, after rpcd (START=12) is up, so a
+# password that was set to "" (e.g. through LuCI) or a ttylogin write lost to
+# a first-boot race is corrected without waiting for someone to log in at the
+# console. See /usr/libexec/tropic01-console-guard.
+# shellcheck disable=SC2034  # START is read by /etc/rc.common
+
+START=99
+
+start() {
+	/usr/libexec/tropic01-console-guard enforce
+}

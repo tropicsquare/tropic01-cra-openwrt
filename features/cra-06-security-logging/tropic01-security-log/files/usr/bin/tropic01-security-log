@@ -1,0 +1,55 @@
+#!/bin/sh
+# tropic01-security-log -- look at, stop and erase the security log (the user's opt-out).
+#
+#   status        is it on, is it running, how big is the log
+#   show [N]      the last N lines (default 50)
+#   disable       opt out: stop recording and monitoring (stored lines are kept)
+#   enable        switch it back on
+#   clear         delete the stored log and the change baseline
+# shellcheck disable=SC3043  # 'local' is supported by OpenWrt's busybox ash
+
+LOG=/etc/tropic01/log/security.log
+DIR=/etc/tropic01/log
+INIT=/etc/init.d/tropic01-security-log
+
+enabled() { [ "$(uci -q get tropic01-security-log.main.enabled)" != 0 ]; }
+
+case "$1" in
+status)
+	if enabled; then echo "recording: on"; else echo "recording: OFF (opted out)"; fi
+	if pgrep -f tropic01-log-recorder >/dev/null 2>&1 && pgrep -f tropic01-config-audit >/dev/null 2>&1; then
+		echo "running: yes"
+	else
+		echo "running: no"
+	fi
+	if [ -f "$LOG" ]; then
+		echo "stored: $(wc -c < "$LOG") bytes, $(wc -l < "$LOG") lines ($LOG)"
+	else
+		echo "stored: nothing"
+	fi
+	echo "cap: $(uci -q get tropic01-security-log.main.max_kb) KiB per file, current plus one rotated"
+	;;
+show)
+	[ -f "$LOG" ] || [ -f "$LOG.1" ] || { echo "no stored log" >&2; exit 1; }
+	cat "$LOG.1" "$LOG" 2>/dev/null | tail -n "${2:-50}"
+	;;
+disable)
+	uci set tropic01-security-log.main.enabled=0 && uci commit tropic01-security-log || exit 1
+	"$INIT" restart >/dev/null 2>&1
+	echo "security logging is OFF. Stored lines are kept; 'tropic01-security-log clear' deletes them."
+	;;
+enable)
+	uci set tropic01-security-log.main.enabled=1 && uci commit tropic01-security-log || exit 1
+	"$INIT" restart >/dev/null 2>&1
+	echo "security logging is ON."
+	;;
+clear)
+	rm -f "$DIR"/security.log "$DIR"/security.log.* "$DIR"/baseline.sha256
+	echo "stored security log and change baseline deleted."
+	logger -p authpriv.notice -t tropic01-audit "stored security log cleared by the user"
+	;;
+*)
+	echo "usage: $0 status|show [N]|disable|enable|clear" >&2
+	exit 2
+	;;
+esac

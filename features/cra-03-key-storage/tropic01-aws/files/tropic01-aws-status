@@ -1,0 +1,81 @@
+#!/bin/sh
+# tropic01-aws-status — show TROPIC01 AWS IoT provisioning and connection state
+#
+# Reads ECC slot 1 public key and R-MEM slot 2 certificate, prints a summary.
+# Safe to run while OpenVPN is active: only reads, does not hold SPI open.
+
+PKCS11_MODULE=/usr/lib/libtropic_pkcs11.so
+CERT_DIR=/etc/ssl/tropic01-aws
+DEVICE_PEM="$CERT_DIR/device.pem"
+CA_PEM="$CERT_DIR/AmazonRootCA1.pem"
+LAST_PUB_FILE=/tmp/tropic01-aws-last-pub
+
+echo "=== TROPIC01 AWS IoT Status ==="
+echo ""
+
+# --- Chip reachability ---
+echo "[ TROPIC01 chip ]"
+if pkcs11-tool --module "$PKCS11_MODULE" --list-token-slots >/dev/null 2>&1; then
+    echo "  Status    : reachable"
+else
+    echo "  Status    : NOT REACHABLE (SPI busy or chip absent)"
+    echo "  Note      : OpenVPN may be holding the SPI bus."
+    echo "  Tip       : run while OpenVPN is stopped, or use --no-openvpn flag"
+fi
+echo ""
+
+# --- ECC slot 1 (AWS IoT key) ---
+echo "[ ECC Slot 1 — AWS IoT private key ]"
+PUBKEY_DER=$(pkcs11-tool --module "$PKCS11_MODULE" \
+    --read-object --type pubkey --id 01 2>/dev/null)
+if [ -n "$PUBKEY_DER" ]; then
+    echo "  Key       : present"
+    PUBKEY_FP=$(pkcs11-tool --module "$PKCS11_MODULE" \
+        --read-object --type pubkey --id 01 2>/dev/null | \
+        openssl pkey -pubin -inform DER -noout -text 2>/dev/null | \
+        grep -A1 "pub:" | tail -1 | tr -d ' :')
+    [ -n "$PUBKEY_FP" ] && echo "  Pub bytes : $PUBKEY_FP"
+else
+    echo "  Key       : NOT PROVISIONED"
+    echo "  Tip       : run tropic01-aws-provision to generate key in ECC slot 1"
+fi
+echo ""
+
+# --- Device certificate (R-MEM slot 2 / device.pem) ---
+echo "[ Device Certificate — AWS IoT identity ]"
+if [ -f "$DEVICE_PEM" ]; then
+    SUBJ=$(openssl x509 -noout -subject -in "$DEVICE_PEM" 2>/dev/null | sed 's/subject=//')
+    ISSUER=$(openssl x509 -noout -issuer -in "$DEVICE_PEM" 2>/dev/null | sed 's/issuer=//')
+    NOT_AFTER=$(openssl x509 -noout -enddate -in "$DEVICE_PEM" 2>/dev/null | sed 's/notAfter=//')
+    FINGERPRINT=$(openssl x509 -noout -fingerprint -sha256 -in "$DEVICE_PEM" 2>/dev/null | sed 's/.*Fingerprint=//')
+    echo "  File      : $DEVICE_PEM"
+    echo "  Subject   : $SUBJ"
+    echo "  Issuer    : $ISSUER"
+    echo "  Expires   : $NOT_AFTER"
+    echo "  SHA256    : $FINGERPRINT"
+else
+    echo "  File      : NOT FOUND ($DEVICE_PEM)"
+    echo "  Tip       : run tropic01-aws-provision to export cert from R-MEM slot 2"
+fi
+echo ""
+
+# --- Amazon Root CA ---
+echo "[ Amazon Root CA ]"
+if [ -f "$CA_PEM" ]; then
+    CA_SUBJ=$(openssl x509 -noout -subject -in "$CA_PEM" 2>/dev/null | sed 's/subject=//')
+    echo "  File      : $CA_PEM"
+    echo "  Subject   : $CA_SUBJ"
+else
+    echo "  File      : NOT FOUND ($CA_PEM)"
+    echo "  Tip       : download from https://www.amazontrust.com/repository/AmazonRootCA1.pem"
+fi
+echo ""
+
+# --- Last publish timestamp ---
+echo "[ Last publish ]"
+if [ -f "$LAST_PUB_FILE" ]; then
+    echo "  Timestamp : $(cat "$LAST_PUB_FILE")"
+else
+    echo "  Timestamp : never published in this session"
+fi
+echo ""

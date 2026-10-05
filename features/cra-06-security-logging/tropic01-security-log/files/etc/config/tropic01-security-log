@@ -1,0 +1,11 @@
+# CRA Annex I 2(l): security logging. See features/cra-06-security-logging/README.md.
+#
+# Opt-out (the requirement asks for one): `tropic01-security-log disable`, or
+# set enabled to 0 and run `/etc/init.d/tropic01-security-log restart`.
+# Stored lines stay until `tropic01-security-log clear`.
+config log 'main'
+	option enabled '1'
+	# size cap of the stored log, in KiB
+	option max_kb '256'
+	# seconds between checks for modified config / service enablement
+	option interval '30'

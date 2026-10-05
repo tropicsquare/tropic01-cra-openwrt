@@ -1,0 +1,18 @@
+#!/bin/sh /etc/rc.common
+# Unlocks the vault early, before OpenVPN takes TROPIC01's single SPI session at
+# START=90. A vault that cannot be unlocked simply stays locked: the system boots
+# normally and nothing is mounted.
+# shellcheck disable=SC2034  # START/STOP are read by /etc/rc.common
+
+START=45
+STOP=15
+
+start() {
+	[ -f "$(uci -q get tropic01-vault.main.image)" ] || return 0
+	[ "$(uci -q get tropic01-vault.main.enabled)" = 0 ] && return 0
+	/usr/sbin/tropic01-vault open || logger -t tropic01-vault "vault stays locked (open failed)"
+}
+
+stop() {
+	/usr/sbin/tropic01-vault close
+}

@@ -1,0 +1,16 @@
+# gitleaks configuration (used automatically by the lint workflow's secret scan).
+# Keep the default rules and allow exactly two known, public, non-secret things.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "known public test values"
+paths = [
+  # Placeholder text between PEM markers in an example config; there is no key in it.
+  '''features/cra-03-key-storage/examples/.*\.example$''',
+]
+regexes = [
+  # sha256-crypt hash of the EMPTY string with a fixed salt: a public test value used to
+  # reproduce the "empty password stored as a hash" case (see cra-01 and tests/hardware).
+  '''\$5\$tropic01x\$[A-Za-z0-9./]+''',
+]

@@ -1,0 +1,34 @@
+config PACKAGE_openvpn_openssl
+	bool "openvpn (OpenSSL + PKCS#11) - VPN client with TROPIC01 hardware keys"
+	depends on PACKAGE_libopenssl && PACKAGE_libpkcs11-helper
+	select PACKAGE_kmod-tun
+	select PACKAGE_libpkcs11-helper
+	help
+	  OpenVPN client built against OpenSSL with pkcs11-helper support.
+
+	  This variant enables hardware-backed TLS authentication using private
+	  keys and certificates stored in the TROPIC01 secure element via the
+	  standard PKCS#11 interface.  The private key is generated inside and
+	  never extracted from the TROPIC01 chip.
+
+	  Key OpenVPN directives for TROPIC01:
+	    pkcs11-providers  /usr/lib/libtropic_pkcs11.so
+	    pkcs11-id         <URI from pkcs11-tool -O>
+	    pkcs11-pin-cache  300
+
+	  A fully-commented sample configuration is installed as:
+	    /etc/openvpn/tropic01-pkcs11-client.conf
+
+	  Requires:
+	    Libraries -> libtropic-pkcs11
+	    Libraries -> pkcs11-helper
+
+config PACKAGE_openvpn_wolfssl
+	bool "openvpn (wolfSSL, no PKCS#11) - lightweight VPN client"
+	depends on PACKAGE_libwolfssl
+	select PACKAGE_kmod-tun
+	help
+	  OpenVPN client built against wolfSSL for a smaller binary footprint.
+
+	  PKCS#11 / TROPIC01 hardware-key support is NOT available in this
+	  variant.  Select openvpn_openssl above for TROPIC01 integration.

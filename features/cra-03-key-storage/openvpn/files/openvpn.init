@@ -1,0 +1,63 @@
+#!/bin/sh /etc/rc.common
+# OpenVPN init script for OpenWrt (procd-based)
+# Copyright (C) 2026 OpenWrt.org
+#
+# shellcheck disable=SC2034  # USE_PROCD/START/STOP are read by /etc/rc.common
+# shellcheck disable=SC3043  # 'local' is supported by OpenWrt's busybox ash
+
+USE_PROCD=1
+START=90
+STOP=10
+
+OPENVPN_CONF_DIR=/etc/openvpn
+OPENVPN_BIN=/usr/sbin/openvpn
+
+start_instance() {
+	local cfg="$1"
+	local enabled config
+
+	config_get_bool enabled "$cfg" enabled 0
+	[ "$enabled" -eq 0 ] && return 0
+
+	config_get config "$cfg" config ""
+	[ -z "$config" ] && {
+		# Auto-derive config from section name: /etc/openvpn/<name>.conf
+		config="${OPENVPN_CONF_DIR}/${cfg}.conf"
+	}
+
+	[ -f "$config" ] || {
+		echo "openvpn: config file '$config' not found for instance '$cfg'" >&2
+		return 1
+	}
+
+	procd_open_instance "$cfg"
+	procd_set_param command "$OPENVPN_BIN" \
+		--cd "$OPENVPN_CONF_DIR" \
+		--config "$config" \
+		--writepid "/var/run/openvpn-${cfg}.pid"
+	# PKCS#11 hardware tokens (e.g. TROPIC01) need SPI initialisation time
+	# after boot.  Use a 30-second respawn delay and allow 10 retries so
+	# the second attempt fires after the hardware is ready (~30 s post-boot).
+	if grep -q "pkcs11-providers" "$config" 2>/dev/null; then
+		procd_set_param respawn 120 30 10
+	else
+		procd_set_param respawn
+	fi
+	procd_set_param stderr 1
+	procd_set_param pidfile "/var/run/openvpn-${cfg}.pid"
+	procd_close_instance
+}
+
+start_service() {
+	config_load openvpn
+	config_foreach start_instance openvpn
+}
+
+service_triggers() {
+	procd_add_reload_trigger openvpn
+}
+
+reload_service() {
+	stop_service
+	start_service
+}

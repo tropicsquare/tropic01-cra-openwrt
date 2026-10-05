@@ -1,0 +1,13 @@
+--- libtropic-pkcs11-0.1.0/src/pkcs11.c	2026-02-19 13:44:43.000000000 +0100
++++ libtropic-pkcs11-eng/src/pkcs11.c	2026-02-22 18:41:20.089824011 +0100
+@@ -22,8 +22,8 @@
+  *************************************************************************************************/
+ 
+ /* Pairing keys for secure session (defined in libtropic/libtropic_default_sh0_keys.c) */
+-#define LT_PKCS11_SH0_PRIV sh0priv_prod0
+-#define LT_PKCS11_SH0_PUB sh0pub_prod0
++#define LT_PKCS11_SH0_PRIV sh0priv_eng_sample
++#define LT_PKCS11_SH0_PUB sh0pub_eng_sample
+ 
+ /*
+  * Define a custom max size of R-Memory slot to keep compatibility among TROPIC01 firmware versions.

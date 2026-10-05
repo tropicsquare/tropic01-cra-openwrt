@@ -1,0 +1,10 @@
+ =====================================================================
+  WARNING -- CRA Annex I 2(b): this unit still has NO ROOT PASSWORD.
+  This is a deliberate development default, not a shipped product
+  state -- see docs/cra/compliance-pitfalls.md in this repo ("unique
+  default credentials vs. development velocity").
+
+  Set one now:            passwd
+  Or provision per-unit (production units, before they leave your
+  hands):  host-tools/tropic01-gen-credential.sh <serial> <build-dir> <manifest>
+ =====================================================================

@@ -1,0 +1,24 @@
+config PACKAGE_libtropic-pkcs11
+	bool "libtropic-pkcs11 - PKCS#11 module for TROPIC01"
+	depends on PACKAGE_libtropic
+	select PACKAGE_libopenssl
+	help
+	  NOTE: For testing with pkcs11-tool, also enable:
+	  Utilities -> opensc
+	  A PKCS#11 Cryptoki module for the TROPIC01 secure element.
+	  
+	  This library provides standard PKCS#11 interface for:
+	  - Hardware random number generation (TRNG)
+	  - Secure data storage (512 slots × 444 bytes in R-MEM)
+	  - ECC key generation (P-256/Ed25519) in 32 key slots
+	  - Digital signatures (ECDSA/EdDSA, private keys stay on chip)
+	  
+	  Compatible with pkcs11-tool, OpenSSL, Firefox, and other
+	  PKCS#11-aware applications. Enables using TROPIC01 as a
+	  hardware security module (HSM) for cryptographic operations.
+	  
+	  The module is installed as /usr/lib/libtropic_pkcs11.so
+	  
+	  Default USB device: /dev/ttyACM0
+	  
+	  https://github.com/tropicsquare/libtropic-pkcs11

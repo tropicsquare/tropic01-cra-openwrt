@@ -1,0 +1,21 @@
+config PACKAGE_libtropic
+	bool "libtropic - TROPIC01 SDK library"
+	depends on PACKAGE_libmbedtls
+	help
+	  Libtropic is a C SDK library for application development with TROPIC01
+	  secure element. It provides APIs for secure communication, cryptographic
+	  operations, and hardware abstraction for TROPIC01 chip integration.
+	  
+	  This package builds libtropic as a static library. Applications need to
+	  configure the appropriate HAL (Hardware Abstraction Layer) and CAL 
+	  (Crypto Abstraction Layer) when linking against this library.
+	  
+	  Supported platforms:
+	    - Linux SPI
+	    - POSIX TCP (for testing with model)
+	    - POSIX USB dongle
+	  
+	  Crypto backend:
+	    - MbedTLS v4
+	  
+	  https://github.com/tropicsquare/libtropic

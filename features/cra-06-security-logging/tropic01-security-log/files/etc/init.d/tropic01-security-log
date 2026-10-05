@@ -1,0 +1,48 @@
+#!/bin/sh /etc/rc.common
+# Records security-relevant events to a size-capped file on flash, and watches
+# config and service enablement for changes. Both stop when the user opts out.
+# shellcheck disable=SC2034  # START/STOP/USE_PROCD are read by /etc/rc.common
+# shellcheck disable=SC3043  # 'local' is supported by OpenWrt's busybox ash
+
+START=96
+STOP=10
+USE_PROCD=1
+
+LOGDIR=/etc/tropic01/log
+# logread -e matches the message text only (the program tag is part of it, the
+# facility/level are not), and it is a *basic* regular expression: alternation is
+# \| and the ERE form (a|b) silently matches nothing. So select by program:
+# SSH (dropbear), console login, LuCI (dispatcher.uc) and rpcd logins, passwd,
+# this project's own tags, and firmware-update messages.
+FILTER='dropbear\|login\[\|dispatcher\.uc\|rpcd\|passwd:\|tropic01-\|sysupgrade\|firstboot\|upgrade: '
+
+start_service() {
+	local enabled max_kb interval
+
+	config_load tropic01-security-log
+	config_get_bool enabled main enabled 1
+	if [ "$enabled" != 1 ]; then
+		logger -p authpriv.notice -t tropic01-audit "security log is switched off by the user (opt-out)"
+		return 0
+	fi
+	config_get max_kb main max_kb 256
+	config_get interval main interval 30
+
+	mkdir -p "$LOGDIR"
+	chmod 700 "$LOGDIR"
+	logger -p authpriv.notice -t tropic01-audit "security log started uptime=$(cut -d. -f1 /proc/uptime)s"
+
+	procd_open_instance recorder
+	procd_set_param command /usr/libexec/tropic01-log-recorder "$((max_kb * 1024))" "$FILTER"
+	procd_set_param respawn
+	procd_close_instance
+
+	procd_open_instance config-audit
+	procd_set_param command /usr/libexec/tropic01-config-audit "$interval"
+	procd_set_param respawn
+	procd_close_instance
+}
+
+service_triggers() {
+	procd_add_reload_trigger tropic01-security-log
+}

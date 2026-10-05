@@ -1,0 +1,13 @@
+config PACKAGE_lt-util
+	bool "lt-util - Command line utility for TROPIC01 secure element"
+	depends on PACKAGE_libtropic
+	help
+	  Command line utility for interfacing with TROPIC01 chip.
+	  
+	  Provides access to TROPIC01 secure element features:
+	  - Random number generation
+	  - ECC key management (generate, install, sign)
+	  - Memory operations
+	  - Chip identification
+	  
+	  Supports Linux SPI interface for direct chip communication.

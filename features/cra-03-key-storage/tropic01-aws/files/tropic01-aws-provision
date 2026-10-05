@@ -1,0 +1,98 @@
+#!/bin/sh
+# tropic01-aws-provision — provision TROPIC01 ECC slot 1 for AWS IoT Core
+#
+# This script automates the provisioning steps for AWS IoT device authentication:
+#  1. Generate P-256 key pair in TROPIC01 ECC slot 1
+#  2. Export the public key and create a self-signed certificate CSR
+#  3. Export the device cert from R-MEM slot 2 to PEM (if already written)
+#
+# After running this script you need to:
+#  a) Register the device certificate (or its CA) in AWS IoT Core
+#  b) Create an IoT Thing and attach the certificate + policy
+#  c) Get the AWS IoT endpoint from the AWS Console or CLI:
+#       aws iot describe-endpoint --endpoint-type iot:Data-ATS
+#  d) Write the endpoint to /etc/config/tropic01-aws
+
+PKCS11_MODULE=/usr/lib/libtropic_pkcs11.so
+CERT_DIR=/etc/ssl/tropic01-aws
+DEVICE_PEM="$CERT_DIR/device.pem"
+
+log() { logger -t tropic01-aws-provision "$*"; echo "$*"; }
+
+die() { log "ERROR: $*"; exit 1; }
+
+mkdir -p "$CERT_DIR"
+
+# --- Step 1: Generate or verify ECC slot 1 key ---
+log "Checking ECC slot 1..."
+if pkcs11-tool --module "$PKCS11_MODULE" \
+        --read-object --type pubkey --id 01 >/dev/null 2>&1; then
+    log "ECC slot 1 already has a key — skipping key generation"
+    log "(to regenerate: lt-util --generate-key --slot 1)"
+else
+    log "Generating P-256 key in TROPIC01 ECC slot 1..."
+    lt-util --generate-key --slot 1 || die "Key generation failed"
+    log "Key generated in ECC slot 1"
+fi
+
+# --- Step 2: Export public key ---
+log "Exporting public key from ECC slot 1..."
+pkcs11-tool --module "$PKCS11_MODULE" \
+    --read-object --type pubkey --id 01 \
+    -o /tmp/tropic01-aws-pubkey.der 2>/dev/null || \
+    die "Failed to export public key from ECC slot 1"
+
+# Convert to PEM for further use
+openssl pkey -pubin -in /tmp/tropic01-aws-pubkey.der -inform DER \
+    -out /tmp/tropic01-aws-pubkey.pem 2>/dev/null || \
+    die "Failed to convert public key to PEM"
+log "Public key exported to /tmp/tropic01-aws-pubkey.pem"
+
+# --- Step 3: Export device cert from R-MEM slot 2 (if present) ---
+log "Checking R-MEM slot 2 for device certificate..."
+
+# Try reading cert object via PKCS#11 (slot index 1 = ECC slot 1 cert)
+CERT_DER=$(pkcs11-tool --module "$PKCS11_MODULE" \
+    --read-object --type cert --id 01 2>/dev/null)
+
+if [ -n "$CERT_DER" ]; then
+    if pkcs11-tool --module "$PKCS11_MODULE" \
+        --read-object --type cert --id 01 \
+        -o /tmp/tropic01-aws-cert.der 2>/dev/null && \
+        openssl x509 -in /tmp/tropic01-aws-cert.der -inform DER \
+        -out "$DEVICE_PEM" 2>/dev/null; then
+        log "Device certificate exported to $DEVICE_PEM"
+    else
+        log "WARNING: Failed to convert certificate to PEM"
+    fi
+else
+    log "No certificate found in R-MEM slot 2 (PKCS#11 id=01)"
+    log ""
+    log "To write a certificate to TROPIC01 R-MEM slot 2:"
+    log "  1. Get your signed DER certificate from your CA"
+    log "     (submit CSR generated from /tmp/tropic01-aws-pubkey.pem)"
+    log "  2. lt-util --write-data --slot 2 --file device.cer.der"
+    log "  3. Re-run tropic01-aws-provision"
+    log ""
+    log "For AWS IoT self-signed (test) certificate:"
+    log "  openssl req -new -x509 -key /tmp/tropic01-aws-pubkey.pem \\"
+    log "    -subj '/CN=tropic01-aws' -days 3650 \\"
+    log "    -out /tmp/device.pem"
+    log "  openssl x509 -in /tmp/device.pem -outform DER -out /tmp/device.cer.der"
+    log "  lt-util --write-data --slot 2 --file /tmp/device.cer.der"
+fi
+
+# --- Summary ---
+echo ""
+echo "=== Provisioning Summary ==="
+echo "ECC slot 1   : P-256 key present"
+[ -f "$DEVICE_PEM" ] && \
+    echo "Device cert  : $DEVICE_PEM" || \
+    echo "Device cert  : NOT YET WRITTEN to R-MEM slot 2"
+echo ""
+echo "Next steps:"
+echo "  1. Register device cert in AWS IoT Core (Console or CLI)"
+echo "  2. Create an IoT Thing and attach the cert + a policy"
+echo "  3. Get your endpoint: aws iot describe-endpoint --endpoint-type iot:Data-ATS"
+echo "  4. Set endpoint in UCI: uci set tropic01-aws.main.endpoint=<your-endpoint>"
+echo "  5. Test: tropic01-aws-connect --endpoint <endpoint> --topic dt/test"

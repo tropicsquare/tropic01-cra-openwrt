@@ -1,0 +1,79 @@
+--- libtropic-pkcs11-0.1.0/libtropic/include/libtropic.h.orig	2026-02-28 10:48:18.881001114 +0100
++++ libtropic-pkcs11-0.1.0/libtropic/include/libtropic.h	2026-02-28 10:48:37.533184799 +0100
+@@ -550,6 +550,18 @@
+                            uint8_t *rs);
+ 
+ /**
++ * @brief Performs ECDSA sign with a pre-computed SHA-256 hash.
++ * Use with PKCS#11 CKM_ECDSA where the caller provides the hash directly.
++ * @param h           Handle for communication with TROPIC01
++ * @param ecc_slot    Slot containing a private key
++ * @param hash        Pre-computed 32-byte hash to sign
++ * @param rs          Buffer for signature r||s (64 bytes)
++ * @retval            LT_OK on success
++ */
++lt_ret_t lt_ecc_ecdsa_sign_prehash(lt_handle_t *h, const lt_ecc_slot_t ecc_slot,
++                                    const uint8_t *hash, uint8_t *rs);
++
++/**
+  * @brief Performs EdDSA sign of a message with a private ECC key stored in TROPIC01
+  *
+  * @param h           Handle for communication with TROPIC01
+--- libtropic-pkcs11-0.1.0/libtropic/src/libtropic.c.orig	2026-02-28 10:48:18.884001143 +0100
++++ libtropic-pkcs11-0.1.0/libtropic/src/libtropic.c	2026-02-28 10:48:37.533184799 +0100
+@@ -1300,6 +1300,55 @@
+     return lt_in__ecc_ecdsa_sign(h, rs);
+ }
+ 
++
++/**
++ * @brief Performs ECDSA sign with a pre-computed SHA-256 hash (bypasses internal hashing).
++ *
++ * Use this when the hash has already been computed by the caller (e.g., via PKCS#11
++ * CKM_ECDSA mechanism where the caller passes in a 32-byte digest directly).
++ *
++ * @param h        Handle for communication with TROPIC01
++ * @param ecc_slot Slot containing a private key, TR01_ECC_SLOT_0 - TR01_ECC_SLOT_31
++ * @param hash     Pre-computed 32-byte SHA-256 hash to sign
++ * @param rs       Buffer for the signature (r||s, 64 bytes)
++ * @retval         LT_OK on success
++ */
++lt_ret_t lt_ecc_ecdsa_sign_prehash(lt_handle_t *h, const lt_ecc_slot_t ecc_slot,
++                                    const uint8_t *hash, uint8_t *rs)
++{
++    if (!h || !hash || !rs || (ecc_slot > TR01_ECC_SLOT_31)) {
++        return LT_PARAM_ERR;
++    }
++    if (h->l3.session_status != LT_SECURE_SESSION_ON) {
++        return LT_HOST_NO_SESSION;
++    }
++
++    /* Build L3 ECDSA sign command with pre-computed hash (skip SHA-256 step) */
++    struct lt_l3_ecdsa_sign_cmd_t *p_l3_cmd = (struct lt_l3_ecdsa_sign_cmd_t *)h->l3.buff;
++    p_l3_cmd->cmd_size = TR01_L3_ECDSA_SIGN_CMD_SIZE;
++    p_l3_cmd->cmd_id   = TR01_L3_ECDSA_SIGN_CMD_ID;
++    p_l3_cmd->slot     = ecc_slot;
++    memcpy(p_l3_cmd->msg_hash, hash, sizeof(p_l3_cmd->msg_hash));
++
++    lt_ret_t ret = lt_l3_encrypt_request(&h->l3);
++    if (ret != LT_OK) {
++        return ret;
++    }
++
++    ret = lt_l2_send_encrypted_cmd(&h->l2, h->l3.buff, h->l3.buff_len);
++    if (ret != LT_OK) {
++        return ret;
++    }
++
++    ret = lt_l2_recv_encrypted_res(&h->l2, h->l3.buff,
++                                   lt_min(h->l3.buff_len, TR01_L3_ECDSA_SIGN_RES_PACKET_SIZE));
++    if (ret != LT_OK) {
++        return ret;
++    }
++
++    return lt_in__ecc_ecdsa_sign(h, rs);
++}
++
+ lt_ret_t lt_ecc_eddsa_sign(lt_handle_t *h, const lt_ecc_slot_t ecc_slot, const uint8_t *msg, const uint16_t msg_len,
+                            uint8_t *rs)
+ {

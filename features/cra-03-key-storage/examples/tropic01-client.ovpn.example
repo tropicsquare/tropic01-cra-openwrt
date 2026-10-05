@@ -1,0 +1,70 @@
+# tropic01-client.ovpn.example
+#
+# OpenVPN client profile — TROPIC01 hardware-key authentication
+# (software key fallback for testing without the secure element)
+#
+# Copy this file, fill in the placeholders, and deploy it to
+# /etc/openvpn/tropic01-client.conf on the router.
+#
+# IMPORTANT: Real CA, device certificate, and TLS static key values
+# must NEVER be committed to version control.  Generate them through
+# the provisioning workflow described in TROPIC01_VPN_ROUTER_SETUP.md.
+
+client
+dev tun
+proto udp
+remote <VPN_SERVER_IP> 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+
+remote-cert-tls server
+
+cipher AES-256-GCM
+data-ciphers AES-256-GCM:AES-128-GCM
+auth SHA256
+
+verb 3
+status /tmp/openvpn-tropic01.status 30
+log-append /var/log/openvpn-tropic01.log
+
+# --- CA certificate (VPN server CA, not the AWS IoT CA) ---
+# Replace with the output of: cat /etc/openvpn/ca.crt
+<ca>
+-----BEGIN CERTIFICATE-----
+<REPLACE_WITH_YOUR_VPN_CA_CERTIFICATE>
+-----END CERTIFICATE-----
+</ca>
+
+# --- Device certificate (issued by the VPN CA) ---
+# Replace with the DER→PEM certificate extracted from TROPIC01 R-MEM slot 1.
+<cert>
+-----BEGIN CERTIFICATE-----
+<REPLACE_WITH_YOUR_DEVICE_CERTIFICATE>
+-----END CERTIFICATE-----
+</cert>
+
+# --- Private key (software key, for testing without TROPIC01) ---
+# For production: remove this <key> block and use the pkcs11-* directives below.
+<key>
+-----BEGIN EC PRIVATE KEY-----
+<REPLACE_WITH_YOUR_PRIVATE_KEY_OR_REMOVE_AND_USE_PKCS11>
+-----END EC PRIVATE KEY-----
+</key>
+
+# --- Uncomment for PKCS#11 hardware key (production) ---
+# Remove the <key> block above when using these lines.
+# Discover the pkcs11-id with:
+#   openvpn --show-pkcs11-ids /usr/lib/libtropic_pkcs11.so
+#
+# pkcs11-providers /usr/lib/libtropic_pkcs11.so
+# pkcs11-id 'TropicSquare/TROPIC01\x2DES/<CHIP-SERIAL>/<TOKEN-LABEL>/00'
+
+# --- TLS pre-shared key (HMAC firewall) ---
+# Replace with: cat /etc/openvpn/ta.key
+<tls-crypt>
+-----BEGIN OpenVPN Static key V1-----
+<REPLACE_WITH_YOUR_TLS_STATIC_KEY>
+-----END OpenVPN Static key V1-----
+</tls-crypt>

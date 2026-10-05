@@ -1,0 +1,20 @@
+config PACKAGE_pkcs11-test
+	bool "pkcs11-test - Simple PKCS#11 testing utility"
+	default n
+	help
+	  A lightweight utility for testing PKCS#11 modules.
+	  
+	  This is a minimal alternative to pkcs11-tool from OpenSC,
+	  designed for basic PKCS#11 module testing without heavy
+	  dependencies. Perfect for embedded systems.
+	  
+	  Features:
+	  - Load and test PKCS#11 modules
+	  - Display module information
+	  - Test init/finalize functions
+	  - Very small footprint (~10KB)
+	  
+	  Use this to quickly test libtropic-pkcs11 or any other
+	  PKCS#11 module without installing full OpenSC.
+	  
+	  For full PKCS#11 functionality, use opensc package instead.

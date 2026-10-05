@@ -1,0 +1,51 @@
+--- libtropic-pkcs11-0.1.0/CMakeLists.txt	2026-02-19 13:44:43.000000000 +0100
++++ libtropic-pkcs11-spi/CMakeLists.txt	2026-02-22 18:22:52.761643665 +0100
+@@ -7,7 +7,12 @@
+ # User configuration
+ ###############################################################################
+ option(LT_PKCS11_LOG_EN "Enable PKCS11 logging" OFF)
+-set(TS_USB_DEV "/dev/ttyACM0" CACHE STRING "Device path for TROPIC01 USB dongle")
++
++# SPI device configuration
++set(TS_SPI_DEV "/dev/spidev2.0" CACHE STRING "Device path for SPI")
++set(TS_GPIO_DEV "/dev/gpiochip0" CACHE STRING "Device path for GPIO chip")
++set(TS_GPIO_CS_PIN "25" CACHE STRING "GPIO chip select pin number")
++set(TS_SPI_SPEED "1000000" CACHE STRING "SPI speed in Hz")
+ 
+ 
+ ###############################################################################
+@@ -23,7 +28,10 @@
+ message("libtropic PKCS11 build configuration:")
+ message("   Version:        ${CMAKE_PROJECT_VERSION}")
+ message("   Logging:        ${LT_PKCS11_LOG_EN}")
+-message("   USB device:     ${TS_USB_DEV}")
++message("   SPI device:     ${TS_SPI_DEV}")
++message("   GPIO device:    ${TS_GPIO_DEV}")
++message("   GPIO CS pin:    ${TS_GPIO_CS_PIN}")
++message("   SPI speed:      ${TS_SPI_SPEED}")
+ message("   Libtropic:      ${PATH_LIBTROPIC}")
+ message("   Libtropic CAL:  OpenSSL")
+ message("")
+@@ -58,8 +66,8 @@
+ target_sources(tropic PRIVATE ${LT_CAL_SRCS})
+ target_include_directories(tropic PUBLIC ${LT_CAL_INC_DIRS})
+ 
+-# Add USB DevKit POSIX HAL for Libtropic
+-add_subdirectory("${PATH_LIBTROPIC}hal/posix/usb_dongle" "posix_usb_dongle")
++# Add Linux SPI HAL for Libtropic
++add_subdirectory("${PATH_LIBTROPIC}/hal/linux/spi" "linux_spi")
+ target_sources(tropic PRIVATE ${LT_HAL_SRCS})
+ target_include_directories(tropic PUBLIC ${LT_HAL_INC_DIRS})
+ 
+@@ -81,5 +89,9 @@
+     target_compile_definitions(tropic_pkcs11 PRIVATE LT_PKCS11_LOG_EN=0)
+ endif()
+ 
+-# Pass device path as a compile definition (with quotes for string literal)
+-target_compile_definitions(tropic_pkcs11 PRIVATE TS_USB_DEV="${TS_USB_DEV}")
++# Pass SPI configuration as compile definitions
++target_compile_definitions(tropic_pkcs11 PRIVATE 
++    TS_SPI_DEV="${TS_SPI_DEV}"
++    TS_GPIO_DEV="${TS_GPIO_DEV}"
++    TS_GPIO_CS_PIN=${TS_GPIO_CS_PIN}
++    TS_SPI_SPEED=${TS_SPI_SPEED})

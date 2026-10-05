@@ -1,0 +1,10 @@
+# CRA Annex I 2(m): the encrypted vault. See features/cra-05-secure-erase/README.md.
+config vault 'main'
+	# unlock the vault at boot (it only exists after `tropic01-vault init`)
+	option enabled '1'
+	option mount '/vault'
+	option image '/etc/tropic01/vault.img'
+	option size_mb '16'
+	# TROPIC01 R-MEM slot that holds the 32-byte data key. 32-511 are general
+	# purpose; 1-31 hold factory certificates and must never be used here.
+	option slot '100'
