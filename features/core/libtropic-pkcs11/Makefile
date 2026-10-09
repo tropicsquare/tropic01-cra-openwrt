@@ -61,6 +61,7 @@ endef
 
 # CMake configuration options
 CMAKE_OPTIONS += \
+	-DLIBTROPIC_SRC=$(STAGING_DIR)/usr/src/libtropic \
 	-DLT_PKCS11_LOG_EN=ON \
 	-DLT_SH0_KEYS="eng_sample" \
 	-DTS_SPI_DEV="/dev/spidev2.0" \
@@ -69,9 +70,8 @@ CMAKE_OPTIONS += \
 	-DTS_SPI_SPEED=1000000 \
 	-DCMAKE_BUILD_TYPE=Release
 
-# Libtropic is included as a submodule in libtropic-pkcs11
-# The tarball source already includes the submodule content, so we don't need
-# to do anything special in the prepare phase
+# The tarball still carries the old libtropic submodule; it is not used. The build
+# takes the pinned libtropic package's source tree instead (LIBTROPIC_SRC above).
 define Build/Prepare
 	$(call Build/Prepare/Default)
 endef

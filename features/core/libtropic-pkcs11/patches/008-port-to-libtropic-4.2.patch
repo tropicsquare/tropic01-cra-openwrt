@@ -1,0 +1,93 @@
+Port libtropic-pkcs11 to libtropic 4.2.0.
+
+Build against the one libtropic source tree the feed pins (-DLIBTROPIC_SRC),
+not the older copy bundled as a submodule. Changes: the engineering-sample
+pairing key symbols got an lt_ prefix, TR01_CURVE_GENERATED became
+TR01_KEY_GENERATED, and signing uses lt_ecc_ecdsa_sign(), which in 4.x takes
+a 32-byte hash and does not hash again (this replaces the local
+lt_ecc_ecdsa_sign_prehash() that patch 005 added to the bundled copy). A
+digest longer than 32 bytes is cut to its leftmost 32 bytes; a shorter one is
+refused with CKR_DATA_LEN_RANGE instead of being hashed or padded.
+
+--- a/CMakeLists.txt	2026-10-09 18:27:14.235078090 +0200
++++ b/CMakeLists.txt	2026-10-09 18:27:14.250078298 +0200
+@@ -20,7 +20,12 @@
+ ###############################################################################
+ 
+ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+-set(PATH_LIBTROPIC ${CMAKE_CURRENT_SOURCE_DIR}/libtropic/)
++# libtropic is not bundled: the OpenWrt package passes the pinned libtropic source tree.
++set(LIBTROPIC_SRC "" CACHE PATH "Path to the libtropic source tree")
++if(NOT LIBTROPIC_SRC OR NOT EXISTS "${LIBTROPIC_SRC}/CMakeLists.txt")
++    message(FATAL_ERROR "Set -DLIBTROPIC_SRC to a libtropic source tree")
++endif()
++set(PATH_LIBTROPIC ${LIBTROPIC_SRC}/)
+ 
+ ###############################################################################
+ # Print info
+--- a/src/pkcs11.c	2026-10-09 18:27:14.234078076 +0200
++++ b/src/pkcs11.c	2026-10-09 18:27:14.251078311 +0200
+@@ -24,8 +24,8 @@
+  *************************************************************************************************/
+ 
+ /* Pairing keys for secure session (defined in libtropic/libtropic_default_sh0_keys.c) */
+-#define LT_PKCS11_SH0_PRIV sh0priv_eng_sample
+-#define LT_PKCS11_SH0_PUB sh0pub_eng_sample
++#define LT_PKCS11_SH0_PRIV lt_sh0priv_eng_sample
++#define LT_PKCS11_SH0_PUB lt_sh0pub_eng_sample
+ 
+ /*
+  * Per-unit pairing key (CRA Annex I 2(d)).
+@@ -1275,7 +1275,7 @@
+                 LT_PKCS11_LOG("CKA_LOCAL");
+ 
+                 /* Keys generated on chip are local */
+-                CK_BBOOL is_local = (origin == TR01_CURVE_GENERATED) ? CK_TRUE : CK_FALSE;
++                CK_BBOOL is_local = (origin == TR01_KEY_GENERATED) ? CK_TRUE : CK_FALSE;
+                 if (pTemplate[i].pValue == NULL) {
+                     pTemplate[i].ulValueLen = sizeof(CK_BBOOL);
+                 } else if (pTemplate[i].ulValueLen >= sizeof(CK_BBOOL)) {
+@@ -1849,24 +1849,19 @@
+         LT_PKCS11_INFO("ECDSA/P-256 sign: %lu-byte hash -> TROPIC01 key slot %u (private key never leaves chip)",
+                        ulDataLen, pkcs11_ctx.sign_key_slot);
+         /*
+-         * CKM_ECDSA: caller passes a pre-computed hash (typically 32-byte SHA-256).
+-         * Use lt_ecc_ecdsa_sign_prehash() to send the hash directly to the hardware
+-         * without the internal SHA-256 step (avoids double-hashing).
++         * CKM_ECDSA: the caller passes a pre-computed hash. libtropic 4.x signs exactly a
++         * 32-byte hash and does not hash again. A longer digest is cut to its leftmost 32
++         * bytes, as ECDSA specifies for P-256; a shorter one is refused, never padded.
+          */
+-        lt_ret_t ret;
+-        if (ulDataLen == 32) {
+-            ret = lt_ecc_ecdsa_sign_prehash(&pkcs11_ctx.lt_handle,
+-                                            (lt_ecc_slot_t)pkcs11_ctx.sign_key_slot,
+-                                            pData, pSignature);
+-        } else {
+-            /* Longer data - hash it internally (legacy/non-standard use) */
+-            ret = lt_ecc_ecdsa_sign(&pkcs11_ctx.lt_handle,
+-                                    (lt_ecc_slot_t)pkcs11_ctx.sign_key_slot,
+-                                    pData, ulDataLen, pSignature);
++        if (ulDataLen < 32) {
++            LT_PKCS11_RETURN(CKR_DATA_LEN_RANGE);
+         }
++        lt_ret_t ret = lt_ecc_ecdsa_sign(&pkcs11_ctx.lt_handle,
++                                         (lt_ecc_slot_t)pkcs11_ctx.sign_key_slot,
++                                         pData, 32, pSignature);
+ 
+         if (ret != LT_OK) {
+-            LT_PKCS11_LOG("lt_ecc_ecdsa_sign(_prehash) failed: %s", lt_ret_verbose(ret));
++            LT_PKCS11_LOG("lt_ecc_ecdsa_sign failed: %s", lt_ret_verbose(ret));
+             LT_PKCS11_RETURN(CKR_DEVICE_ERROR);
+         }
+ 
+--- a/src/pkcs11.h	2026-10-09 18:27:14.234078076 +0200
++++ b/src/pkcs11.h	2026-10-09 18:27:28.473275030 +0200
+@@ -200,6 +200,7 @@
+ #define CKR_SLOT_ID_INVALID                     0x00000003  /**< Invalid slot ID */
+ #define CKR_GENERAL_ERROR                       0x00000005  /**< Unspecified error */
+ #define CKR_ARGUMENTS_BAD                       0x00000007  /**< Invalid argument(s) */
++#define CKR_DATA_LEN_RANGE                      0x00000021  /**< Input data length is out of range */
+ #define CKR_ATTRIBUTE_TYPE_INVALID              0x00000012  /**< Invalid attribute type */
+ #define CKR_ATTRIBUTE_VALUE_INVALID             0x00000013  /**< Invalid attribute value */
+ #define CKR_DEVICE_ERROR                        0x00000030  /**< Hardware/device error */

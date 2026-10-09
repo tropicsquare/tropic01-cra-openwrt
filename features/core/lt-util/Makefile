@@ -29,7 +29,7 @@ define Package/lt-util
   CATEGORY:=Utilities
   TITLE:=Command line utility for TROPIC01 secure element
   URL:=https://github.com/tropicsquare/libtropic-util
-  DEPENDS:=+libtropic
+  DEPENDS:=+libtropic +libopenssl
 endef
 
 define Package/lt-util/description
@@ -41,14 +41,11 @@ define Package/lt-util/description
 endef
 
 CMAKE_OPTIONS += \
-	-DLINUX_SPI=ON \
-	-DCMAKE_BUILD_TYPE=Debug \
-	-DLT_PRINT_SPI_DATA=1 \
-	-DLT_BUILD_EXAMPLES=OFF \
-	-DLT_BUILD_TESTS=OFF \
+	-DLIBTROPIC_SRC=$(STAGING_DIR)/usr/src/libtropic \
+	-DCMAKE_BUILD_TYPE=Release \
+	-DLT_PRINT_SPI_DATA=OFF \
 	-DLT_HELPERS=ON \
-	-DLT_LOG_LVL=None \
-	-DLT_USE_TREZOR_CRYPTO=ON
+	-DLT_LOG_LVL=Error
 
 # CMakeLists.txt doesn't have install target, binary is built in-tree
 define Build/Install
