@@ -113,8 +113,9 @@ Annex I 2(f), 2(c). Design is in [cra-02's README](../../features/cra-02-verifie
 - **3.7 Upgrade libtropic.** *Done to v4.2.0 (not 4.1: 4.2 raises the R-MEM read buffer from 444 to 475 bytes).*
   Verified on an OpenWrt One: chip identification, the secure session with the shared key, R-MEM read,
   pairing-slot inspection and the per-unit-key refusal rules (`bench.py cra04`, 13 of 13), and a certificate
-  request signed by the chip through `libtropic-pkcs11` that verifies on a PC. Still to run on the final image:
-  the whole suite, the vault `init`/`destroy`, an OpenVPN tunnel (needs a WAN link), and the AWS test (3.1).
+  request signed by the chip through `libtropic-pkcs11` that verifies on a PC. *Final image (2026-10-09):* flashed
+  clean, `bench.py suite` 56 of 56. Still to run on it: the vault `init`/`destroy` (writes R-MEM slot 100), an
+  OpenVPN tunnel (needs a WAN link), and the AWS test (3.1).
   Open: check the chip's firmware version against what 4.2 ships (App FW 2.2.0 update files exist), and decide
   whether `LT_SILICON_REV` (default `ACAB`) matches the silicon on the board. *S.*
 - **3.8 `lt-util` after the libtropic upgrade.** libtropic 4.x has **no Linux command-line tool**: its "TROPIC01 Util"

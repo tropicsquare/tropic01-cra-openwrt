@@ -72,3 +72,21 @@ make build                                    # the image
 # flash from failsafe: sysupgrade -n, then a full power-cycle
 python3 tests/hardware/bench.py suite         # everything that needs no irreversible chip step
 ```
+
+## libtropic 4.2.0 upgrade (2026-10-09)
+
+The results above were produced with the older libtropic. After the upgrade to v4.2.0 (one libtropic for
+`lt-util` and the PKCS#11 module, branch `feat/libtropic-4.2`) the image was rebuilt and flashed clean
+(`sysupgrade -n`; the board stalled after the flash and needed a full power and USB unplug, as before).
+SHA-256 `814e8fb05ad3b0da4f27391390c2d0f4af5391d1cf4a489cfa328d8db1ae6ec3`.
+
+- `bench.py suite`: **56 of 56** checks pass (web 6, cra-04 13 with the `lt-util` installed in the image,
+  cra-05 stack 6, cra-06 18, cra-01 13). The cra-04 checks cover chip ID, the secure session with the shared key,
+  an R-MEM read (299 bytes), pairing-slot inspection and the per-unit-key refusal rules.
+- A certificate request made with the chip's ECC slot 0 key through the PKCS#11 module and OpenSSL verifies on a PC
+  ("self-signature verify OK"), which exercises the 4.x signing path (a 32-byte hash, signed once).
+- **Found and fixed during the upgrade:** the first ported `lt-util` crashed (segmentation fault) on every chip
+  command, because libtropic 4.x needs the application to supply the crypto context of the handle.
+
+Not re-run after the upgrade: the vault `init`/`destroy` (they write and erase R-MEM slot 100), an OpenVPN tunnel
+(the bench has no WAN link) and the AWS test. The chip's firmware version has not been compared with what 4.2 ships.
