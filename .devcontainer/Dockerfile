@@ -8,7 +8,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 	gettext git libncurses-dev libssl-dev python3 python3-setuptools \
 	python3-pyelftools rsync swig unzip zlib1g-dev file wget curl \
 	ca-certificates zstd xz-utils bzip2 patch perl time which \
-	shellcheck openssl \
+	shellcheck openssl iproute2 \
 	&& rm -rf /var/lib/apt/lists/*
 
 ARG USER_UID=1000
