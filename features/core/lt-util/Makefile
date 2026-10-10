@@ -5,6 +5,9 @@ PKG_VERSION:=0.1.0
 PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
+# Only the project itself: it no longer uses its bundled libtropic submodule (the feed
+# builds one libtropic), and a submodule-inclusive tarball is not reproducible.
+PKG_SOURCE_SUBMODULES:=skip
 PKG_SOURCE_URL:=https://github.com/tropicsquare/libtropic-util.git
 # Pinned to the commit this package was actually built and tested
 # against, not HEAD (which moves). Verified byte-identical (except
@@ -13,7 +16,7 @@ PKG_SOURCE_URL:=https://github.com/tropicsquare/libtropic-util.git
 PKG_SOURCE_VERSION:=cbc30f5ac37e7d0874df6b989d4b4be7d01d93e8
 PKG_SOURCE_DATE:=2025-09-12
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_SOURCE_DATE)-$(PKG_SOURCE_VERSION).tar.zst
-PKG_MIRROR_HASH:=de29f4380f9fe0b17dd1cc17bd17d787b08ce30f93e11a6a3244156f2148cd7b
+PKG_MIRROR_HASH:=8cadc90bd9b77106cd8993296fae85f907f288e204b862383e8163e244c37128
 PKG_SOURCE_SUBDIR:=$(PKG_NAME)-$(PKG_VERSION)
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 

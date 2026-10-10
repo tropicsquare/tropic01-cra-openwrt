@@ -12,6 +12,9 @@ PKG_VERSION:=0.1.0
 PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
+# Only the project itself: it no longer uses its bundled libtropic submodule (the feed
+# builds one libtropic), and a submodule-inclusive tarball is not reproducible.
+PKG_SOURCE_SUBMODULES:=skip
 PKG_SOURCE_URL:=https://github.com/tropicsquare/libtropic-pkcs11.git
 # Pinned to the commit this package was actually built and tested
 # against, not HEAD (which moves). NOTE: this is 6accc15, the parent of
@@ -26,7 +29,7 @@ PKG_SOURCE_URL:=https://github.com/tropicsquare/libtropic-pkcs11.git
 PKG_SOURCE_VERSION:=6accc15c73ab0ed454f4813bfb061d323ee4b869
 PKG_SOURCE_DATE:=2026-02-19
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_SOURCE_DATE)-$(PKG_SOURCE_VERSION).tar.zst
-PKG_MIRROR_HASH:=1a5ecde3b6892af5b55ca89fab7052ec949695f9da56d975c62ce834bbc1f2e7
+PKG_MIRROR_HASH:=7913725afc54e4b92a30f273e59de9b261d558262c268af61964ccf8615fb9dc
 PKG_SOURCE_SUBDIR:=$(PKG_NAME)-$(PKG_VERSION)
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
