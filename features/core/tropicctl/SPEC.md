@@ -1,6 +1,6 @@
-# tropic01: a command-line tool for TROPIC01 on Linux (specification draft)
+# tropicctl: a command-line tool for TROPIC01 on Linux (specification draft)
 
-**Status: draft for review. No code exists yet.** This document defines what the tool does, how it behaves and how it
+**Status: draft, decisions 1 to 4 made (section 12). No code exists yet.** This document defines what the tool does, how it behaves and how it
 is tested, so that the interface can be agreed before it is built. It replaces the patched `lt-util` that this feed
 carries today and is written so that it could also be used outside this project.
 
@@ -29,7 +29,7 @@ carries today and is written so that it could also be used outside this project.
 3. Scriptable: stable exit codes, `--json`, data on stdout and notices on stderr.
 4. Documented from one source: `--help`, the manual page and the reference below are generated from the same command
    table, so they cannot disagree with the code.
-5. Testable without a chip: against libtropic's TROPIC01 model, then on hardware.
+5. Testable without a chip: through a hand-written fake chip behind the chip interface, then on hardware.
 
 **Non-goals**
 - Not a PKCS#11 module or an OpenSSL provider (see backlog 3.11); it complements them.
@@ -38,33 +38,64 @@ carries today and is written so that it could also be used outside this project.
 - No firmware update in the first version (a later `fw` area, with its own safety review).
 - No USB DevKit support; Linux SPI and GPIO only.
 
-## 3. Name, layout, build
+## 3. Name, packaging, layout, build
 
-- Binary `tropic01`, OpenWrt package `tropic01-tool`. (Name to be confirmed, section 12.)
-- C11, libtropic 4.2.x from the feed's single pinned source, OpenSSL crypto layer, Linux SPI hardware layer; the same
-  build rules as `lt-util` today (no bundled copies, pinned hash).
+- Binary **`tropicctl`**, OpenWrt package `tropicctl`. Decided 2026-10-10.
+- **A package in this feed, written to be movable.** The tool lives in one self-contained directory,
+  `features/core/tropicctl/`, with its own `CMakeLists.txt`, `src/`, `tests/`, `docs/`, `README.md`, `CHANGELOG.md` and
+  `LICENSE`, and nothing in it refers to files elsewhere in this repository. The OpenWrt `Makefile` is the only part
+  that knows about the feed; it builds from the local `src/`. Moving the tool to its own repository later means
+  copying the directory and changing that one Makefile to fetch a pinned release (`PKG_SOURCE_URL` and
+  `PKG_MIRROR_HASH`); the tests and documentation go with it. The feed's `make test` and CI call the tool's own test
+  entry point, so they do not need to change either.
+- C11, libtropic 4.2.x from the feed's single pinned source (`-DLIBTROPIC_SRC`), OpenSSL crypto layer, Linux SPI
+  hardware layer; no bundled copies. For development outside OpenWrt it builds on a normal Linux host with the same
+  CMake file.
+- **The chip sits behind an interface.** Commands never call libtropic directly; they use `chip.h` (open, session,
+  ecc, mem, pairing, config, mnd, counter, info). There are two implementations selected at build time: the real one
+  on libtropic, and a hand-written fake that keeps its state in files and models slots, access rights, the R-config
+  erase-and-write rule and the failure cases seen on real chips. This is how the command logic and every safety rule
+  are tested on a host without a chip (section 10).
 - Source layout, so that each file has one job:
 
 ```
-src/main.c            argument parsing, dispatch
+CMakeLists.txt  Makefile (OpenWrt)  README.md  CHANGELOG.md  LICENSE
+src/main.c            argument parsing, dispatch, legacy mode (section 11)
 src/cmd_table.c       the command table: name, summary, usage, safety class, handler (the single source of truth)
-src/session.c         open the chip, choose the pairing key, start the session; the only place that does
+src/chip.h            the chip interface
+src/chip_libtropic.c  the real implementation (the only file that includes libtropic.h)
+src/chip_fake.c       the hand-written fake, for tests only
+src/session.c         choose the pairing key, start the session; the only place that does
 src/keys.c            pairing key sources (shared, per-unit files, PIN-protected)
 src/lock.c            the lock file around the chip
 src/output.c          text and JSON writers, error reporting
 src/errors.c          libtropic status -> exit code and message
 src/safety.c          confirmation flags, refusal rules, read-back helpers
 src/cmd_info.c  cmd_rng.c  cmd_ecc.c  cmd_mem.c  cmd_pairing.c  cmd_config.c  cmd_mnd.c  cmd_counter.c
-docs/                 generated manual page and reference; tests/ ; CHANGELOG.md
+docs/                 generated manual page and reference
+tests/                unit tests, fake-chip command tests, hardware test scripts
 ```
+
+### 3.1 Who needs what
+
+Scope of version 1 is what this project's CRA features need, plus every command `lt-util` has today.
+
+| Feature | Needs |
+|---|---|
+| cra-02 verified boot (rollback protection) | `counter`, `info fw`, `ecc sign` / `ecc pub` (signature checks) |
+| cra-03 key storage, VPN and cloud identity | `ecc generate`, `ecc pub`, `ecc sign`, `mem write`/`read` (certificates), `info chip` |
+| cra-04 access control | `pairing`, `config`, `mnd`, `session test`, `--key pin` |
+| cra-05 vault and storage encryption | `rng get`, `mem write`/`read`/`erase`, `mnd` (PIN-unlocked storage) |
+| cra-06 security log (future anchoring) | `ecc sign`, `mem write`, `counter` |
+| everything today | the `lt-util` commands (section 11) |
 
 ## 4. Conventions
 
 ### 4.1 Invocation
 
 ```
-tropic01 [global options] <area> <verb> [arguments] [command options]
-tropic01 help [area [verb]]      tropic01 version
+tropicctl [global options] <area> <verb> [arguments] [command options]
+tropicctl help [area [verb]]      tropicctl version
 ```
 
 ### 4.2 Global options
@@ -128,12 +159,12 @@ One invocation opens one secure session and closes it. The key source is `--key`
 | `file:PATH:SLOT` | an explicit key file and slot |
 | `pin` | the PIN-protected key of tier 1 in the cra-04 design: open a bootstrap session, run MAC-and-Destroy with the PIN, decrypt the protected key, open the real session |
 
-`tropic01 session test [--key SOURCE]` opens and closes a session and reports which key and slot were used.
+`tropicctl session test [--key SOURCE]` opens and closes a session and reports which key and slot were used.
 
 ## 6. Serialising access to the chip
 
 The chip allows one secure session at a time. Until a broker exists the tool takes an exclusive `flock` on
-`/var/lock/tropic01.lock` for the whole invocation and waits up to `--lock-timeout`; the PKCS#11 module is expected to
+`/var/lock/tropicctl.lock` for the whole invocation and waits up to `--lock-timeout`; the PKCS#11 module is expected to
 take the same lock. This turns "chip busy" from a mystery failure into exit code 3 with a clear message.
 
 ## 7. Command reference
@@ -224,14 +255,14 @@ See section 5. Class R.
 Text is one fact per line. JSON is one object on stdout; errors are an object on stderr:
 
 ```
-$ tropic01 --json pairing list
+$ tropicctl --json pairing list
 {"pairing_slots":[{"slot":0,"state":"populated"},{"slot":1,"state":"empty"},
                   {"slot":2,"state":"empty"},{"slot":3,"state":"empty"}],"key":{"source":"shared","slot":0}}
 
-$ tropic01 --json mem read 1 --out /tmp/c1
+$ tropicctl --json mem read 1 --out /tmp/c1
 {"slot":1,"bytes":299,"file":"/tmp/c1"}
 
-$ tropic01 --json pairing write 0 --in k.pub --yes-write-pairing-slot ; echo $?
+$ tropicctl --json pairing write 0 --in k.pub --yes-write-pairing-slot ; echo $?
 {"error":{"code":9,"name":"refused","message":"pairing slot 0 holds the shared engineering key and is never written"}}
 9
 ```
@@ -240,7 +271,7 @@ JSON field names are part of the interface and changes are listed in `CHANGELOG.
 
 ## 9. Documentation plan
 
-- `tropic01 help …` prints from the command table; `make man` produces the manual page from the same table.
+- `tropicctl help …` prints from the command table; `make man` produces the manual page from the same table.
 - `docs/guide.md`: first steps, key handling, a worked provisioning example, recovery notes (what a lost PIN means).
 - `docs/reference.md`: generated: every command, option, class, exit code.
 - `docs/safety.md`: the safety classes, the chip hazards (R-config erase-before-write, one-way I-config bits, slots
@@ -249,39 +280,51 @@ JSON field names are part of the interface and changes are listed in `CHANGELOG.
 
 ## 10. Test plan
 
+Hand-written fake plus hardware. There is no dependency on libtropic's software model.
+
 | Level | What | Chip |
 |---|---|---|
 | Unit | argument parsing, exit-code mapping, JSON output, the safety gate, the config validator and decoder | none |
-| Model | every command against libtropic's TROPIC01 software model: sessions, access rights, slot lifecycles, config erase and write, MAC-and-Destroy | model |
-| Sandbox | callers (vault, provisioning script) against a fake `tropic01` | none |
+| Fake chip | every command through `chip_fake.c`, on a host and in CI: slot lifecycles (a pairing slot is written once, an occupied slot is refused), access rights per key and slot group, R-config erase-then-write, failures (silent write failure, corrupted write, chip down), MAC-and-Destroy attempts | fake |
+| Sandbox | callers (vault, provisioning script) against a fake `tropicctl` | none |
 | Hardware | the bench suite: today's 13 chip checks, the vault, a chip-signed CSR, plus the new read-only commands; irreversible commands only on a spare chip | bench / spare |
 
-A rule for every **I** and **H** command: a test that it refuses without its flag, and a test that breaking the guard
-makes a test fail (as done for `tropic01-pairing`). The model's fidelity to the engineering-sample silicon is checked
-by running the read-only commands on the bench chip and comparing.
+Rules for the fake, so it cannot give false comfort:
+- Every rule it models is labelled **measured** (checked on a chip, with the date and report) or **assumed**
+  (taken from headers or the datasheet). A test that depends on an assumed rule says so.
+- Each hardware run re-checks the measured rules, and any difference is fixed in the fake first.
+- The read-only commands are compared between the fake's defaults and the bench chip (the survey in the hardware
+  report is the first such comparison).
 
-## 11. Migration from `lt-util`
+Rules for every **I** and **H** command: a test that it refuses without its flag, and a mutation check showing that
+breaking the guard makes a test fail (as done for the `tropic01-pairing` draft).
 
-A compatibility script `lt-util` (installed by the same package) maps the old flags, prints a deprecation notice to
-stderr, and returns 1 for any non-zero exit as before. It exists so callers can move one at a time.
+## 11. Migration from `lt-util` (inheriting its commands)
+
+Every `lt-util` command is kept. The package installs a symlink `lt-util` to `tropicctl`; when the program is started
+under the name `lt-util` it runs in **legacy mode**: it accepts the old flags, behaves as before (same text output for
+`-i`, exit status 0 or 1, the same notice and error texts that callers parse today, for example "using the per-unit
+pairing key, slot N" and "Error sec channel"), and prints a one-line deprecation notice on stderr that
+`TROPICCTL_NO_DEPRECATION=1` silences. Callers can then move one at a time. The new commands are not available in
+legacy mode, except the two survey commands that already exist (`-x -r`, `-x -f`).
 
 | Old | New |
 |---|---|
-| `lt-util -i` | `tropic01 info chip` |
-| `lt-util -r <n> <file>` | `tropic01 rng get <n> --out <file>` |
-| `lt-util -e -g <slot>` | `tropic01 ecc generate <slot> --curve p256` |
-| `lt-util -e -d <slot> <file>` | `tropic01 ecc pub <slot> --out <file>` |
-| `lt-util -e -c <slot>` | `tropic01 ecc erase <slot>` |
-| `lt-util -e -i <slot> <file>` | `tropic01 ecc store <slot> --curve ed25519 --in <file>` (the old command only stores Ed25519) |
-| `lt-util -e -s <slot> <in> <out>` | `tropic01 ecc sign <slot> --in <in> --out <out>` (now also correct for P-256 slots) |
-| `lt-util -m -s <slot> <file>` | `tropic01 mem write <slot> --in <file>` |
-| `lt-util -m -r <slot> <file>` | `tropic01 mem read <slot> --out <file>` |
-| `lt-util -m -e <slot>` | `tropic01 mem erase <slot>` |
-| `lt-util -k -r <slot> <file>` | `tropic01 pairing read <slot> --out <file>` |
-| `lt-util -k -w <slot> <file> --irreversible` | `tropic01 pairing write <slot> --in <file> --yes-write-pairing-slot` |
-| `lt-util -x -r` | `tropic01 config dump` |
-| `lt-util -x -f` | `tropic01 info fw` |
-| `LT_UTIL_FORCE_SHARED_KEY=1` | `--key shared` (the variable stays honoured by the compatibility script) |
+| `lt-util -i` | `tropicctl info chip` |
+| `lt-util -r <n> <file>` | `tropicctl rng get <n> --out <file>` |
+| `lt-util -e -g <slot>` | `tropicctl ecc generate <slot> --curve p256` |
+| `lt-util -e -d <slot> <file>` | `tropicctl ecc pub <slot> --out <file>` |
+| `lt-util -e -c <slot>` | `tropicctl ecc erase <slot>` |
+| `lt-util -e -i <slot> <file>` | `tropicctl ecc store <slot> --curve ed25519 --in <file>` (the old command only stores Ed25519) |
+| `lt-util -e -s <slot> <in> <out>` | `tropicctl ecc sign <slot> --in <in> --out <out>` (now also correct for P-256 slots) |
+| `lt-util -m -s <slot> <file>` | `tropicctl mem write <slot> --in <file>` |
+| `lt-util -m -r <slot> <file>` | `tropicctl mem read <slot> --out <file>` |
+| `lt-util -m -e <slot>` | `tropicctl mem erase <slot>` |
+| `lt-util -k -r <slot> <file>` | `tropicctl pairing read <slot> --out <file>` |
+| `lt-util -k -w <slot> <file> --irreversible` | `tropicctl pairing write <slot> --in <file> --yes-write-pairing-slot` |
+| `lt-util -x -r` | `tropicctl config dump` |
+| `lt-util -x -f` | `tropicctl info fw` |
+| `LT_UTIL_FORCE_SHARED_KEY=1` | `--key shared` (the variable stays honoured in legacy mode) |
 
 Callers to move, and what each depends on today:
 
@@ -289,29 +332,33 @@ Callers to move, and what each depends on today:
 |---|---|---|
 | `tropic01-vault` | `-i`, `-r`, `-m -s/-r/-e` | exit status only; slot 100 only |
 | `tests/hardware/bench.py` (`cra04`) | `-i`, `-m -r`, `-k -r/-w`, message texts such as "Error sec channel" and "per-unit pairing key, slot" | must switch to exit codes and `--json` |
-| `tropic01-pairing` (draft) | `-i`, `-k -r/-w`, `-m -r`, `-e -d`, `-x -r/-w` | becomes a thin wrapper around `pairing`, `config rewrite` and `config restore` |
+| `tropic01-pairing` (draft) | `-i`, `-k -r/-w`, `-m -r`, `-e -d`, `-x -r/-w` | becomes a thin wrapper around `tropicctl pairing`, `config rewrite` and `config restore` |
 | `tropic01-aws-provision` | `lt-util --generate-key --slot 1`, `--write-data --slot 2 --file …` | **these long options never existed**; rewrite against the new interface (backlog 3.1) |
 | user guides and skills (about 20 documents) | `-e -g`, `-e -d`, `-m -s`, `-i` | search and replace, checked by the link and example checks |
 
-## 12. Decisions for the reviewer
+## 12. Decisions
 
-1. **Name:** `tropic01` (binary) and `tropic01-tool` (package), or keep `lt-util` and break the CLI at 1.0?
-2. **Home:** start inside this feed (`features/core/tropic01-tool/`) and offer it to Tropic Square's `libtropic-util`
-   once stable, or start upstream?
-3. **Scope of version 1:** `info`, `rng`, `ecc`, `mem`, `pairing`, `config`, `session` first; `mnd` and `counter`
-   second. Agree?
-4. **JSON:** worth the code now, or text only first?
-5. **Lock file:** accept `/var/lock/tropic01.lock` as the stop-gap, with the PKCS#11 module patched to take it too?
-6. **Model testing:** accept libtropic's software model as the main automated test (needs a Python-based model and
-   its dependencies in CI), or keep to a hand-written fake plus hardware?
-7. **Raw R-config writes:** keep the rule that none exists, even for experts?
+Decided by the project owner on 2026-10-10:
+1. **Name:** `tropicctl`.
+2. **Home:** an OpenWrt package in this feed, structured so it can move to a separate repository later (section 3).
+3. **Scope of version 1:** everything this project's CRA features need, and the existing `lt-util` commands
+   inherited through legacy mode (sections 3.1 and 11).
+4. **Testing:** a hand-written fake chip plus hardware tests only (section 10).
+
+Proposed, **not yet confirmed**:
+5. **JSON output** is in version 1 (it is cheap and scripts need it).
+6. **Lock file** `/var/lock/tropicctl.lock` is the stop-gap around the chip, and the PKCS#11 module is patched to take
+   it too.
+7. **No raw R-config write command**, even for experts.
 
 ## 13. Phases and acceptance
 
+Version 1.0 contains every area; the phases only order the work. Each phase ends on real hardware.
+
 | Phase | Deliverable | Done when |
 |---|---|---|
-| 0 | this specification reviewed and the decisions above made | decisions recorded here |
-| 1 | skeleton: option parsing, command table, session, lock, output, exit codes, `info`, `rng`, `mem`, `pairing list/read`, `config dump`; generated help and man page; unit tests | builds in the feed; bench read-only checks pass against the real chip |
-| 2 | `ecc`, `pairing write/invalidate`, `config rewrite/restore/diff/burn`; model tests; guard-breaking tests | model suite passes; spare-chip run documented |
-| 3 | compatibility script; callers migrated; `lt-util` patches retired | the full hardware suite (56 checks) and an OpenVPN tunnel pass on the new tool |
-| 4 | `mnd`, `counter`; PIN-protected sessions for cra-04 tier 1 | spare-chip run documented |
+| 0 | this specification reviewed; decisions 5 to 7 confirmed | recorded in section 12 |
+| 1 | skeleton: chip interface and fake, option parsing, command table, session, lock, output, exit codes; `info`, `rng`, `mem`, `pairing list/read`, `config dump`; **legacy mode for the read-only and R-MEM commands**; generated help and manual page; unit and fake-chip tests | builds in the feed; the bench read-only checks pass against the real chip |
+| 2 | `ecc`, `pairing write/invalidate`, `config rewrite/restore/diff/burn`; the rest of legacy mode; guard-breaking tests | fake-chip suite passes; spare-chip run documented |
+| 3 | callers migrated; `lt-util` patches retired | the full hardware suite (56 checks) and an OpenVPN tunnel pass on the new tool |
+| 4 | `mnd`, `counter`; PIN-protected sessions (`--key pin`) for cra-04 tier 1 | spare-chip run documented; counter semantics confirmed from the datasheet first |

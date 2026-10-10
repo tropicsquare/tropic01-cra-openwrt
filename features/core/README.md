@@ -43,8 +43,8 @@ it, signs with them, stores small data (certificates, the vault key) in R-MEM, a
 hardware random numbers. It is **not** the boot root of trust and has no influence on which
 ports are open.
 
-> **Planned:** a new, documented command-line tool to replace the patched `lt-util`; the specification draft is in
-> [tropic01-tool/SPEC.md](tropic01-tool/SPEC.md). No code yet.
+> **Planned:** `tropicctl`, a new, documented command-line tool to replace the patched `lt-util`; the specification draft is in
+> [tropicctl/SPEC.md](tropicctl/SPEC.md). No code yet.
 
 ## Packages
 
