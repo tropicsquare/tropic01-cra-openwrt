@@ -114,8 +114,8 @@ Annex I 2(f), 2(c). Design is in [cra-02's README](../../features/cra-02-verifie
   Verified on an OpenWrt One: chip identification, the secure session with the shared key, R-MEM read,
   pairing-slot inspection and the per-unit-key refusal rules (`bench.py cra04`, 13 of 13), and a certificate
   request signed by the chip through `libtropic-pkcs11` that verifies on a PC. *Final image (2026-10-09, rebuilt from a clean
-  container clone 2026-10-10):* flashed clean, `bench.py suite` 56 of 56 both times. Still to run on it: the vault `init`/`destroy` (writes R-MEM slot 100), an
-  OpenVPN tunnel (needs a WAN link), and the AWS test (3.1).
+  container clone 2026-10-10):* flashed clean, `bench.py suite` 56 of 56 both times. Vault `init`/`destroy` and an OpenVPN tunnel were also run on it
+  (see the hardware report). Still to run: the AWS test (3.1).
   Open: check the chip's firmware version against what 4.2 ships (App FW 2.2.0 update files exist), and decide
   whether `LT_SILICON_REV` (default `ACAB`) matches the silicon on the board. *S.*
 - **3.8 `lt-util` after the libtropic upgrade.** libtropic 4.x has **no Linux command-line tool**: its "TROPIC01 Util"

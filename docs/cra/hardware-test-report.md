@@ -88,7 +88,7 @@ SHA-256 `814e8fb05ad3b0da4f27391390c2d0f4af5391d1cf4a489cfa328d8db1ae6ec3`.
 - **Found and fixed during the upgrade:** the first ported `lt-util` crashed (segmentation fault) on every chip
   command, because libtropic 4.x needs the application to supply the crypto context of the handle.
 
-Not re-run after the upgrade: the vault `init`/`destroy` (they write and erase R-MEM slot 100), an OpenVPN tunnel
+Not re-run in the first 4.2.0 run (done later, see below): the vault `init`/`destroy`, an OpenVPN tunnel
 (the bench has no WAN link) and the AWS test. The chip's firmware version has not been compared with what 4.2 ships.
 
 ### Clean-container build (2026-10-10)
@@ -102,3 +102,23 @@ download cache**, and flashed clean (this time the board came back without a sta
 - The clean build found two build-environment problems that cached downloads and a fuller host had hidden, both fixed:
   the pinned source hash of `libtropic-pkcs11` (and `lt-util`) did not reproduce on a fresh download, and the Debian
   builder image lacked the `ip` command that OpenVPN's `configure` needs (`iproute2` added).
+
+### Vault and OpenVPN on the libtropic 4.2.0 stack (2026-10-10, clean-built image)
+
+Run by hand because they write and erase the chip (R-MEM slot 100 only; slot 1 stayed 299 bytes throughout).
+
+- **Vault:** `init` (slot 100 was empty, now 32 bytes; no key file left on flash or in RAM); data written, lock and
+  unlock work; a copy of the image taken off the board is LUKS2 `aes-xts-plain64` and does not contain the plaintext
+  marker; `destroy` erased slot 100 (reads empty again) and deleted the image; the **old image copy put back was
+  refused** ("could not read the vault key from TROPIC01 slot 100").
+- **Key really in the chip:** the 32 key bytes read from slot 100 do not occur in a copy of `/etc` and the whole
+  persistent overlay (34 MB), nor in the vault image. No file containing a private key exists on the router.
+- **OpenVPN:** the VPN client key is in ECC slot 0 and the certificate in R-MEM slot 1: the certificate's public key
+  equals the chip's slot 0 public key, and the certificate verifies against the VPN's CA. The installed config
+  contains only `pkcs11-providers` and `pkcs11-id` (no `key`, no `cert`). The tunnel came up (WAN link via the home
+  network), the OpenVPN process holds `/dev/spidev2.0` and `/dev/gpiochip0`, the module log shows the handshake
+  signature as "32-byte hash -> TROPIC01 key slot 0 ... 64 bytes produced by TROPIC01 hardware", and 4 of 4 pings
+  to the VPN gateway succeeded (about 7 ms).
+- **Honest limit:** a vault key in R-MEM is readable by anyone who can open a session with the chip, which today
+  uses the shared engineering-sample pairing key (cra-04). The VPN's tls-crypt key (not the client private key) is
+  stored as a `0600` file by design.
