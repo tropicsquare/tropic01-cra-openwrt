@@ -90,3 +90,15 @@ SHA-256 `814e8fb05ad3b0da4f27391390c2d0f4af5391d1cf4a489cfa328d8db1ae6ec3`.
 
 Not re-run after the upgrade: the vault `init`/`destroy` (they write and erase R-MEM slot 100), an OpenVPN tunnel
 (the bench has no WAN link) and the AWS test. The chip's firmware version has not been compared with what 4.2 ships.
+
+### Clean-container build (2026-10-10)
+
+The image was then rebuilt from a **fresh clone of the pushed branch inside the Docker builder image, with no
+download cache**, and flashed clean (this time the board came back without a stall). SHA-256
+`b87a1c459171065ea6d7937fcc82e729c12e2ffd10b79ceebad7ef2a8588b550`.
+
+- `bench.py suite`: **56 of 56** again, and a CSR made with the chip's slot 0 key through the PKCS#11 module verifies
+  on a PC.
+- The clean build found two build-environment problems that cached downloads and a fuller host had hidden, both fixed:
+  the pinned source hash of `libtropic-pkcs11` (and `lt-util`) did not reproduce on a fresh download, and the Debian
+  builder image lacked the `ip` command that OpenVPN's `configure` needs (`iproute2` added).
