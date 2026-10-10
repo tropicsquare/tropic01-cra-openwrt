@@ -118,6 +118,13 @@ Annex I 2(f), 2(c). Design is in [cra-02's README](../../features/cra-02-verifie
   (see the hardware report). Still to run: the AWS test (3.1).
   Open: check the chip's firmware version against what 4.2 ships (App FW 2.2.0 update files exist), and decide
   whether `LT_SILICON_REV` (default `ACAB`) matches the silicon on the board. *S.*
+- **3.13 A new, documented command-line tool for TROPIC01 (`tropic01`), replacing the patched `lt-util`.** Specification draft:
+  [`features/core/tropic01-tool/SPEC.md`](../../features/core/tropic01-tool/SPEC.md): subcommands with safety classes
+  (read-only, reversible, irreversible, hazardous), stable exit codes, `--json`, one session helper, enforced
+  erase-before-write for R-config, MAC-and-Destroy on `lt_mac_and_destroy()`, a lock file around the chip, docs
+  generated from one command table, and tests against libtropic's TROPIC01 model. Phase 0 is the review of the
+  specification and its open decisions (section 12). Supersedes new work on the old tool (3.5, 3.8, and the write side
+  of 4.7 would be built in the new one). *L.*
 - **3.8 `lt-util` after the libtropic upgrade.** libtropic 4.x has **no Linux command-line tool**: its "TROPIC01 Util"
   is a Python program for the USB DevKit only, and the separate `libtropic-util` repository (our source) has no 4.x
   port. So `lt-util` stays, ported by patch 005 to libtropic 4.2.0 with the same command line. Remaining: upstream our
