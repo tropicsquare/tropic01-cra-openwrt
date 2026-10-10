@@ -93,8 +93,9 @@ Annex I 2(f), 2(c). Design is in [cra-02's README](../../features/cra-02-verifie
 - **3.3 Three copies of libtropic.** *Done (branch `feat/libtropic-4.2`):* one pinned libtropic v4.2.0 package; `lt-util` and
   `libtropic-pkcs11` build against its source tree (OpenSSL crypto layer, Linux SPI hardware layer).
 - **3.4 Bump OpenVPN** (pinned at 2.6.12) after a hardware test. *S-M.*
-- **3.5 Expose `lt-util` MAC-and-Destroy** (`-mac-set`, `-mac-ver` are hidden from the usage
-  text) once it is stable; needed by 5.4. *S.*
+- **3.5 MAC-and-Destroy in the command-line tool.** *Done in `tropicctl` (`mnd setup|check|status|seal|unseal`, on libtropic's
+  `lt_mac_and_destroy()`), tested against the fake chip only.* Needed by 5.4. Open: run it on a spare chip; the multiple-PIN
+  and wiping-PIN extensions of the application note. *S.*
 - **3.6 `opensc` does not build** against OpenWrt's fortify headers; `pkcs11-test` covers the
   need. Low priority. *-.*
 
@@ -118,24 +119,24 @@ Annex I 2(f), 2(c). Design is in [cra-02's README](../../features/cra-02-verifie
   (see the hardware report). Still to run: the AWS test (3.1).
   Open: check the chip's firmware version against what 4.2 ships (App FW 2.2.0 update files exist), and decide
   whether `LT_SILICON_REV` (default `ACAB`) matches the silicon on the board. *S.*
-- **3.13 A new, documented command-line tool for TROPIC01 (`tropicctl`), replacing the patched `lt-util`.** Specification draft:
-  [`features/core/tropicctl/SPEC.md`](../../features/core/tropicctl/SPEC.md): subcommands with safety classes
-  (read-only, reversible, irreversible, hazardous), stable exit codes, `--json`, one session helper, enforced
-  erase-before-write for R-config, MAC-and-Destroy on `lt_mac_and_destroy()`, a lock file around the chip, docs
-  generated from one command table, and tests against a hand-written fake chip plus hardware. An OpenWrt package in
-  this feed, self-contained so it can move to its own repository; the old `lt-util` commands are kept through a
-  legacy mode. Phase 0 is the review of the specification (decisions 5 to 7 in section 12 still to confirm). Supersedes new work on the old tool (3.5, 3.8, and the write side
-  of 4.7 would be built in the new one). *L.*
+- **3.13 A new, documented command-line tool for TROPIC01 (`tropicctl`), replacing the patched `lt-util`.** Specification:
+  [`features/core/tropicctl/SPEC.md`](../../features/core/tropicctl/SPEC.md). An OpenWrt package in this feed, written so
+  it can move to its own repository; hand-written fake chip plus hardware tests. *Phases 1 to 4 implemented
+  (2026-10-11): `info`, `rng`, `mem`, `ecc`, `pairing`, `config`, `mnd`, `counter`, `session`, PIN-protected sessions,
+  legacy mode for every old `lt-util` command, about 370 tests, every irreversible and hazardous guard checked by
+  mutation; callers (vault, AWS provisioning script, bench, docs) migrated; read-only run on the bench chip.* Open:
+  (a) the spare-chip runs of everything that writes the chip (`features/core/tropicctl/tests/hardware.md`), which also
+  confirm the access-word layout and the effect of an R-config erase, (b) the full hardware suite on a flashed image,
+  (c) the cra-04 work (`config restrict-shared`, `config rewrite`, `pairing write`, `--key pin`) should replace the draft
+  provisioning script that was written against the old tool, (d) a release process if the tool moves to its own
+  repository. *M.*
 - **3.14 R-MEM slot 0 reads back identical to slot 1 on the bench chip** (found by the tropicctl read-only run,
   2026-10-10), while the documentation says slot 0 is read-protected on the ES silicon. Find out whether slot 0 was
   also written at some point or whether reads of slot 0 are aliased to slot 1, then correct the documentation (the
   core README, the pkcs11 skill and the cra-03 guide say "slot 0 is read-protected, certificates go in slot N+1").
   A spare chip: write a distinct value to slot 1, read slot 0. *S.*
-- **3.8 `lt-util` after the libtropic upgrade.** libtropic 4.x has **no Linux command-line tool**: its "TROPIC01 Util"
-  is a Python program for the USB DevKit only, and the separate `libtropic-util` repository (our source) has no 4.x
-  port. So `lt-util` stays, ported by patch 005 to libtropic 4.2.0 with the same command line. Remaining: upstream our
-  patches (SPI device, P-256 and full public-key export, per-unit pairing key, `-k -r/-w`) or fork the tool; move
-  MAC-and-Destroy from the hand-rolled code to libtropic's `lt_mac_and_destroy()` (3.5). *M.*
+- **3.8 `lt-util` after the libtropic upgrade.** *Superseded by `tropicctl` (3.13): the patched `lt-util` and its six patches
+  are gone from the feed; the package installs an `lt-util` symlink that runs the new tool in compatibility mode.*
 
 ## 4. cra-04 access control (partial)
 
@@ -151,7 +152,8 @@ decision.
   on that unit. *S per unit.*
 - **4.3 UAP scoping per slot** (for example a telemetry slot that can sign but not read or
   write R-MEM; a write-restricted slot for log anchors). Test on a spare chip first. *M.*
-- **4.4 Where the host's private pairing key lives.** Today a root-only file on flash, so
+- **4.4 Where the host's private pairing key lives.** *A PIN-protected pairing key (tier 1) is implemented in `tropicctl`
+  (`--key pin`, `mnd seal`) and tested against the fake chip; the design is in the cra-04 design draft.* Today a root-only file on flash, so
   root or a flash dump of one unit can open that unit's chip. A stronger home needs encrypted
   storage (5.3, 5.4) or a PIN (5.4). Note the chicken-and-egg: the key must be readable
   before the overlay is unlocked. *M.*

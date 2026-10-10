@@ -32,7 +32,7 @@ Each row is a folder under [`features/`](features/) with its own README.
 
 | Feature | CRA Annex I | What it does | Role of TROPIC01 | Status |
 |---|---|---|---|---|
-| [core](features/core/) | n/a | the chip's software layer: `libtropic`, a PKCS#11 module, the `lt-util` tool | the interface to the chip | working |
+| [core](features/core/) | n/a | the chip's software layer: `libtropic`, a PKCS#11 module, the `tropicctl` tool | the interface to the chip | working |
 | [cra-01-secure-defaults](features/cra-01-secure-defaults/) | 2(b) secure by default | closed WAN, SSH on the LAN only, a root password is forced before any shell, empty passwords are refused | **none today** (policy and configuration) | partial |
 | [cra-02-verified-boot](features/cra-02-verified-boot/) | 2(f), 2(c) integrity, rollback | signed boot and anti-rollback | planned: a monotonic counter for anti-rollback. It is **not** the boot root of trust | not started |
 | [cra-03-key-storage](features/cra-03-key-storage/) | 2(e) confidentiality | OpenVPN client whose private key lives in the chip | **central:** generates the key, signs inside the chip, stores the certificate | done for OpenVPN |
@@ -149,7 +149,7 @@ If your upstream network also uses `192.168.1.0/24`, move the router's LAN (stoc
 
 ## 4. Use the features
 
-Check the chip first: `lt-util -i` prints its identification. It must not fail.
+Check the chip first: `tropicctl info chip` prints its identification. It must not fail.
 
 | I want to | Do this |
 |---|---|
@@ -167,7 +167,7 @@ operations cannot, and this project never runs them automatically; the docs mark
 
 | Operation | Why it matters |
 |---|---|
-| writing a pairing-key slot (`lt-util -k -w … --irreversible`) | a slot is written once and cannot be rewritten |
+| writing a pairing-key slot (`tropicctl pairing write … --yes-write-pairing-slot`) | a slot is written once and cannot be rewritten |
 | invalidating pairing-key slot 0 | permanent; if the replacement key is lost, **the chip can never be opened again** |
 | generating a key in an ECC slot, clearing it later | the private key cannot be backed up or read; clearing destroys that identity |
 | erasing an R-MEM slot | the data is gone for good (it is how the vault is destroyed) |

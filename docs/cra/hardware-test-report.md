@@ -145,3 +145,24 @@ certificate `CN=tropic01-client`), although the project documentation says slot 
 Either that certificate was also stored in slot 0 at some point, or reads of slot 0 are answered with slot 1's data.
 Slot 2 holds a 383-byte self-signed certificate (`CN=openwrt-tropic01`), probably from the earlier AWS experiments.
 Nothing was written to find out; a test on a spare chip should write a distinct value to slot 1 and read slot 0.
+
+### tropicctl (all areas), read-only run on the bench chip (2026-10-11)
+
+The cross-built binary was copied to `/tmp` over SSH with OpenVPN stopped, run, removed and OpenVPN restarted. The
+serial console was silent, so the updated `bench.py cra04` could not be run; the same checks were run by hand over SSH.
+Nothing was written to the chip. **The commands that write (ECC key generation and erase, pairing write and
+invalidation, R-config rewrite, I-config burn, MAC-and-Destroy, counter init and update) were NOT run on hardware.**
+
+| Check | Result |
+|---|---|
+| refusals before any chip access | `pairing write` without its flag, for slot 0, with a bad file; `ecc erase` and `config rewrite` without their flags; `mem read 9999`: exit codes 9, 9, 2, 9, 9, 2, and no key announced |
+| `pairing write --dry-run` on empty slot 1 | passes all checks, says it would write, writes nothing |
+| `info chip`, `info fw`, `info mode`, `info cert` | chip ID; `00 02 01 00` / `00 01 03 00`; `application`; **four certificates of 423, 581, 626 and 626 bytes** |
+| `pairing list` | slot 0 populated, 1 to 3 empty |
+| `ecc list` | slots 0 and 1 P-256, slots 2 and 3 Ed25519, all "generated"; the rest empty |
+| `config dump --decode` | 54 raw lines plus decoded access groups; every access object `0xffffffff` (all four keys may do everything) |
+| `counter get 0` to `15` | all exit 6: `LT_L3_COUNTER_INVALID`, **never initialised** (measured; the fake had assumed it) |
+| `config restrict-shared --unit-slot 1` | refused (exit 9): "pairing slot 1 holds no usable key: restricting the shared key first would lock the chip" |
+| **ECDSA on the real chip** | `ecc sign 0 --der` over a message; **OpenSSL on the PC verifies it** against the PEM public key from `ecc pub 0 --format pem`; that key is identical to the public key in the certificate in R-MEM slot 1 |
+| EdDSA on a P-256 slot | exit 2 (refused, not a wrong answer) |
+| legacy mode | `lt-util -x -f` exit 0; `lt-util -k -r 1` on the empty slot exit 1 |

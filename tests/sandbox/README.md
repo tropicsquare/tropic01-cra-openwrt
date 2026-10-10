@@ -1,6 +1,6 @@
 # Sandbox tests
 
-Run the router-side shell scripts on an ordinary Linux host, with fake `logread`, `lt-util`, `cryptsetup`,
+Run the router-side shell scripts on an ordinary Linux host, with fake `logread`, `tropicctl`, `cryptsetup`,
 `mount` and `uci`, so their **logic and safety rules** can be checked without a board:
 
 ```sh

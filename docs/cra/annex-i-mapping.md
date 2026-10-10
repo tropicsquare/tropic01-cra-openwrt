@@ -28,7 +28,7 @@ What is still open, feature by feature, is in [backlog.md](backlog.md).
 
 | Feature | Role of TROPIC01 |
 |---|---|
-| core | the connection: SPI session, PKCS#11 token, `lt-util`; no security property of its own |
+| core | the connection: SPI session, PKCS#11 token, `tropicctl`; no security property of its own |
 | cra-01 | none today (policy and configuration) |
 | cra-02 | **not** the boot root of trust (that is the SoC BootROM and its eFuses); possible monotonic counter for rollback protection, not implemented |
 | cra-03 | central: generates and holds the VPN private key, signs, stores the certificate in R-MEM |
@@ -37,7 +37,7 @@ What is still open, feature by feature, is in [backlog.md](backlog.md).
 | cra-06 | none today; possible future anchoring of log hashes |
 
 `core/` is not a CRA feature: it is the TROPIC01 platform layer (libtropic,
-the PKCS#11 module, `lt-util`) that the features build on.
+the PKCS#11 module, `tropicctl`) that the features build on.
 
 ## Per requirement: hardware vs. policy
 

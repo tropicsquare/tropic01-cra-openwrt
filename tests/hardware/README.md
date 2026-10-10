@@ -8,7 +8,7 @@ else, and are **not** run in CI: CI has no board.
 python3 tests/hardware/bench.py probe          # classify the console, send only a newline
 python3 tests/hardware/bench.py cra01          # full cra-01 cycle (see below)
 python3 tests/hardware/bench.py web            # listener / web checks from the board itself
-python3 tests/hardware/bench.py cra04          # cra-04 checks on the chip with a patched lt-util pushed to /tmp
+python3 tests/hardware/bench.py cra04          # cra-04 checks on the chip with tropicctl (installed, or pushed to /tmp)
 python3 tests/hardware/bench.py capture --settle 600   # record a boot, send nothing
 ```
 
@@ -46,7 +46,7 @@ throwaway RAM image and a random key (no chip access); the chip steps (`init`,
 router's LAN): SSH bound to the LAN address only, HTTP/HTTPS answering, rpcd
 rejecting an empty password.
 
-`cra04` pushes the patched `lt-util` to `/tmp` over the wired bench link and, with
+`cra04` uses the installed `tropicctl` (or pushes one to `/tmp` over the wired bench link with `--binary PATH`) and, with
 nothing flashed and nothing written to the chip, checks: the shared key still works
 with no key files; the four pairing slots can be inspected (read-only); unusable key
 files are refused without falling back; a wrong but well-formed key is rejected by the

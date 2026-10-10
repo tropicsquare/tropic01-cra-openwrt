@@ -48,14 +48,14 @@ invalidated slot 0, so on every unit the shared key still works.
   creates a unit's X25519 pairing key pair into the image overlay
   (`/etc/tropic01/pairing.{key,pub,slot}`) and records the public half in an
   operator manifest outside git. Run per unit, before building its image.
-- `lt-util` (core patch 004) and `libtropic-pkcs11` (core patch 007) read
+- `tropicctl` (`--key auto`) and `libtropic-pkcs11` (core patch 007) read
   those files when they exist and use that key and slot. With **no** key
   files they warn (stderr / syslog) and keep the shared engineering-sample
   key, so unprovisioned bench units still work. With key files that are
   present but unusable they **fail**; they never fall back silently.
-- `lt-util -k -r <slot> <file>` reads the public pairing key of a slot
+- `tropicctl pairing read <slot> --out <file>` reads the public pairing key of a slot
   (0-3). Read-only; useful to see which slots are populated.
-- `lt-util -k -w <slot> <file> --irreversible` writes a 32-byte public key
+- `tropicctl pairing write <slot> --in <file> --yes-write-pairing-slot` writes a 32-byte public key
   into an empty slot 1-3 and reads it back. It refuses slot 0, a non-empty
   slot, a file that is not 32 bytes, and any call without the literal
   `--irreversible`. Run it with `LT_UTIL_FORCE_SHARED_KEY=1` so the session
@@ -73,7 +73,7 @@ specific unit, ideally a spare chip first.
 
 ## Verified on hardware (OpenWrt One, TROPIC01-ES, 2026-10)
 
-Run with `tests/hardware/bench.py cra04`, which pushes the patched `lt-util` to
+Run with `tests/hardware/bench.py cra04`, which pushes `tropicctl` to
 `/tmp` (nothing flashed, nothing written to the chip): with no key files the shared
 key still works; pairing slot 0 is populated and slots 1-3 are **empty**
 (`LT_L3_PAIRING_KEY_EMPTY`), so no per-unit key has ever been provisioned on this unit

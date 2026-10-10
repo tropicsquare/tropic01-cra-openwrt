@@ -148,7 +148,7 @@ chmod 666 /dev/ttyACM0
 ### Module loads but can't communicate with TROPIC01
 - Verify USB connection
 - Check pairing keys match your chip batch (see libtropic documentation)
-- Test with lt-util first to ensure basic connectivity
+- Test with `tropicctl session test` first to ensure basic connectivity
 
 ## Advanced Configuration
 

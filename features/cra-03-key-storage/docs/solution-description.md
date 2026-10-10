@@ -41,14 +41,14 @@ The P-256 (secp256r1) key pair is created **inside the chip** using an on-chip t
 random number generator (TRNG):
 
 ```bash
-lt-util -e -g 0   # Generate P-256 key in ECC slot 0
+tropicctl ecc generate 0 --curve p256   # Generate P-256 key in ECC slot 0
 ```
 
 The private key is placed in **ECC slot 0** and is permanently non-extractable.
 Only the corresponding 64-byte raw public key (X‖Y coordinates) can be read back:
 
 ```bash
-lt-util -e -d 0 /tmp/tropic_pub.bin
+tropicctl ecc pub 0 --out /tmp/tropic_pub.bin
 ```
 
 This is the primary security property: **no software path exists to read or copy
@@ -82,7 +82,7 @@ The X.509 client certificate (DER-encoded, ~300 bytes) is stored in **R-MEM slot
 inside TROPIC01:
 
 ```bash
-lt-util -m -s 1 /tmp/client.der   # Write DER certificate to R-MEM slot 1
+tropicctl mem write 1 --in /tmp/client.der   # Write DER certificate to R-MEM slot 1
 ```
 
 At PKCS#11 token initialization time, patch
@@ -133,13 +133,13 @@ CMake build time so no source editing is needed.
 
 ```
 1. Flash firmware              → libtropic_pkcs11.so baked in
-2. lt-util -e -g 0             → P-256 key pair created in TROPIC01;
+2. tropicctl ecc generate 0 --curve p256             → P-256 key pair created in TROPIC01;
                                   private key never leaves
-3. lt-util -e -d 0 <file>       → export raw 64-byte public key (X‖Y)
+3. tropicctl ecc pub 0 --out <file>       → export raw 64-byte public key (X‖Y)
 4. Wrap in SPKI DER/PEM        → build-host Python snippet
 5. openssl x509 --force_pubkey → CA signs cert binding TROPIC01 public key to a CN
 6. openssl x509 -outform DER   → convert to compact DER (~300 bytes)
-7. lt-util -m -s 1 client.der  → store cert in TROPIC01 R-MEM slot 1
+7. tropicctl mem write 1 --in client.der  → store cert in TROPIC01 R-MEM slot 1
 8. Write OpenVPN config         → pkcs11-providers + pkcs11-id directives
 9. /etc/init.d/openvpn start   → OpenVPN authenticates via TROPIC01 on every handshake
 ```
@@ -208,7 +208,7 @@ AmazonRootCA1.pem / AmazonRootCA3.pem  (trust anchors, also in AWS/)
 |---|---|---|
 | `libtropic` | `features/core/libtropic` | TROPIC01 base SDK |
 | `libtropic-pkcs11` | `features/core/libtropic-pkcs11` | PKCS#11 provider (SPI-patched) |
-| `lt-util` | `features/core/lt-util` | Provisioning CLI (`-g`, `-r`, `-m`) |
+| `tropicctl` | `features/core/tropicctl` | Command-line tool (ECC keys, R-MEM, pairing keys, configuration); also installed as `lt-util` |
 | `pkcs11-helper` | `features/core/pkcs11-helper` | OpenVPN PKCS#11 dependency |
 | `openvpn-openssl` | `features/cra-03-key-storage/openvpn` | OpenVPN with PKCS#11 support |
 
@@ -222,5 +222,5 @@ AmazonRootCA1.pem / AmazonRootCA3.pem  (trust anchors, also in AWS/)
 | `LT_HOST_SECURE_CHANNEL_SETUP` | Wrong pairing keys | Rebuild with `LT_SH0_KEYS=eng_sample` |
 | `LT_L3_R_MEM_DATA_WRITE_WRITE_FAIL` on slot 0 | R-MEM slot 0 is hardware-protected on ES01 | Use slot 1+ |
 | `OpenSSL: error:bad signature` on server | Double-hashing | Ensure patch `005-add-ecdsa-sign-prehash` is applied |
-| No cert found in `--show-pkcs11-ids` | Cert not stored or wrong slot | Re-run `lt-util -m -s 1`; verify `LT_OK` |
+| No cert found in `--show-pkcs11-ids` | Cert not stored or wrong slot | Re-run `tropicctl mem write 1`; --in verify `LT_OK` |
 | TLS handshake timeout (60 s) | Server-side `bad signature` | Prehash patch missing |

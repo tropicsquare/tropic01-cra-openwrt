@@ -18,7 +18,7 @@
 #
 #   TROPIC01-sourced entropy is NOT implemented in this script. Wiring an
 #   actual raw-random pull from the chip needs a host-native
-#   lt-util/libtropic build talking to it over USB or a host SPI adapter
+#   tropicctl/libtropic build talking to it over USB or a host SPI adapter
 #   -- see https://github.com/tropicsquare/libtropic. This script does not
 #   silently claim to use it: every run logs plainly that the source is
 #   /dev/urandom.

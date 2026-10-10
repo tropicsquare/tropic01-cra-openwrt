@@ -56,7 +56,7 @@ CMAKE_OPTIONS += \
 # are chosen by the consumer application, as libtropic intends. This package
 # fetches the one pinned source, builds the core as a static library to check
 # that it compiles, and installs the source tree under usr/src/libtropic so
-# that lt-util and libtropic-pkcs11 build the same code instead of each
+# that tropicctl and libtropic-pkcs11 build the same code instead of each
 # bundling its own copy.
 
 define Build/Install

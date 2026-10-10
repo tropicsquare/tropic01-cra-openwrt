@@ -11,10 +11,11 @@
 # written to flash; while a command runs it exists only as a 0600 file in RAM
 # (/tmp), removed on exit. Without the chip's copy the image cannot be opened.
 # What this does and does not protect is in features/cra-05-secure-erase/README.md.
-# Test hooks: TROPIC01_VAULT_LTUTIL, _CRYPTSETUP, _TMP, _MOUNTS, _DEVMAP, _RETRY_SLEEP.
+# Test hooks: TROPIC01_VAULT_TROPICCTL (or the old TROPIC01_VAULT_LTUTIL), _CRYPTSETUP, _TMP, _MOUNTS, _DEVMAP,
+# _RETRY_SLEEP.
 # shellcheck disable=SC3043  # 'local' is supported by OpenWrt's busybox ash
 
-LT="${TROPIC01_VAULT_LTUTIL:-lt-util}"
+LT="${TROPIC01_VAULT_TROPICCTL:-${TROPIC01_VAULT_LTUTIL:-tropicctl}}"
 CS="${TROPIC01_VAULT_CRYPTSETUP:-cryptsetup}"
 TMPDIR_="${TROPIC01_VAULT_TMP:-/tmp}"
 NAME=tropic01-vault
@@ -42,18 +43,35 @@ case "$SLOT" in
 esac
 [ "$SLOT" -ge 32 ] && [ "$SLOT" -le 511 ] || die "slot $SLOT is outside the general-purpose R-MEM range 32-511 (1-31 hold factory certificates)"
 
-# One attempt, no retry: for probes whose expected answer is "failed" (an empty slot).
+# One attempt, no retry: returns tropicctl's exit status (6 = the slot is empty, 3 = the chip is busy or unreachable).
 chip_once() { "$LT" "$@" >/dev/null 2>&1; }
 
-# TROPIC01 allows one SPI session at a time: retry while another user has it.
+# TROPIC01 allows one SPI session at a time (tropicctl waits for its lock, then reports exit code 3): retry only
+# while the chip is busy or unreachable; any other answer is final.
 chip() {
-	local i=0
+	local i=0 rc
 	while [ "$i" -lt 6 ]; do
-		"$LT" "$@" >/dev/null 2>&1 && return 0
+		"$LT" "$@" >/dev/null 2>&1
+		rc=$?
+		[ "$rc" -eq 0 ] && return 0
+		[ "$rc" -eq 3 ] || return "$rc"
 		i=$((i + 1))
 		sleep "$RETRY_SLEEP"
 	done
-	return 1
+	return 3
+}
+
+# empty | populated | unknown. A chip error is NOT "empty": only tropicctl's exit code 6 says the slot is empty.
+slot_state() {
+	local rc
+	chip_once mem read "$SLOT" --out "$KEYFILE.probe"
+	rc=$?
+	rm -f "$KEYFILE.probe"
+	case "$rc" in
+	0) echo populated ;;
+	6) echo empty ;;
+	*) echo unknown ;;
+	esac
 }
 
 is_open() { [ -e "$DEVMAP/$NAME" ]; }
@@ -61,7 +79,7 @@ is_mounted() { grep -q " $MOUNT " "$MOUNTS" 2>/dev/null; }
 
 fetch_key() {
 	: > "$KEYFILE" && chmod 600 "$KEYFILE"
-	chip -m -r "$SLOT" "$KEYFILE" || return 1
+	chip mem read "$SLOT" --out "$KEYFILE" || return 1
 	[ "$(wc -c < "$KEYFILE")" -eq 32 ]
 }
 
@@ -75,18 +93,18 @@ status)
 init)
 	[ -f "$IMAGE" ] && die "a vault already exists at $IMAGE"
 	# The slot must be empty: never overwrite somebody's data.
-	chip -i || die "TROPIC01 is not reachable (busy or absent)"
-	if chip_once -m -r "$SLOT" "$KEYFILE.probe"; then
-		rm -f "$KEYFILE.probe"
-		die "R-MEM slot $SLOT is not empty -- refusing to touch it"
-	fi
-	rm -f "$KEYFILE.probe"
+	chip info chip || die "TROPIC01 is not reachable (busy or absent)"
+	case "$(slot_state)" in
+	empty) ;;
+	populated) die "R-MEM slot $SLOT is not empty -- refusing to touch it" ;;
+	*) die "cannot tell whether R-MEM slot $SLOT is empty (the chip did not answer cleanly) -- refusing to touch it" ;;
+	esac
 	: > "$KEYFILE.new" && chmod 600 "$KEYFILE.new"
-	chip -r 32 "$KEYFILE.new" || die "could not get random bytes from TROPIC01"
+	chip rng get 32 --out "$KEYFILE.new" || die "could not get random bytes from TROPIC01"
 	[ "$(wc -c < "$KEYFILE.new")" -eq 32 ] || die "unexpected key size"
 	# Key into the chip first and read it back: a power cut then leaves a key but
 	# no image (an empty, harmless vault) and never an image without its key.
-	chip -m -s "$SLOT" "$KEYFILE.new" || die "could not store the key in R-MEM slot $SLOT"
+	chip mem write "$SLOT" --in "$KEYFILE.new" || die "could not store the key in R-MEM slot $SLOT"
 	fetch_key || die "could not read the key back from the chip"
 	cmp -s "$KEYFILE" "$KEYFILE.new" || die "key read back from the chip differs -- not formatting"
 	mkdir -p "$(dirname "$IMAGE")" "$MOUNT"
@@ -125,12 +143,13 @@ destroy)
 	is_mounted && umount "$MOUNT"
 	is_open && "$CS" close "$NAME"
 	# Erase the key first: that is what makes the data unrecoverable. Verify it is gone.
-	chip -m -e "$SLOT" || die "could not erase R-MEM slot $SLOT -- the vault is NOT destroyed"
-	if chip_once -m -r "$SLOT" "$KEYFILE.check"; then
-		rm -f "$KEYFILE.check"
-		die "slot $SLOT still returns data after the erase -- the vault is NOT destroyed"
-	fi
-	rm -f "$KEYFILE.check" "$IMAGE"
+	chip mem erase "$SLOT" || die "could not erase R-MEM slot $SLOT -- the vault is NOT destroyed"
+	case "$(slot_state)" in
+	empty) ;;
+	populated) die "slot $SLOT still returns data after the erase -- the vault is NOT destroyed" ;;
+	*) die "could not confirm that slot $SLOT is empty after the erase -- the vault is NOT destroyed (the image is kept; run destroy again)" ;;
+	esac
+	rm -f "$IMAGE"
 	log "vault destroyed: key erased from R-MEM slot $SLOT, image deleted"
 	;;
 *)

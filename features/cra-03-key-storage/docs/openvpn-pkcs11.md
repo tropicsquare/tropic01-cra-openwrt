@@ -21,7 +21,7 @@ libtropic_pkcs11.so  (PKCS#11 Cryptoki module)
     ▼
 TROPIC01-ES  (Mikroe Click board)
     ECC slot 0  →  P-256 private key  (hardware-generated, never exported)
-    R-MEM slot 1 →  X.509 client cert (DER, written by lt-util)
+    R-MEM slot 1 →  X.509 client cert (DER, written by tropicctl)
 ```
 
 ---
@@ -58,7 +58,7 @@ This tree ships the following custom packages that must be selected:
 |---|---|---|
 | `libtropic` | `features/core/libtropic` | TROPIC01 SDK |
 | `libtropic-pkcs11` | `features/core/libtropic-pkcs11` | PKCS#11 provider (SPI-patched) |
-| `lt-util` | `features/core/lt-util` | Provisioning CLI |
+| `tropicctl` | `features/core/tropicctl` | Command-line tool (also installed as `lt-util`) |
 | `pkcs11-helper` | `features/core/pkcs11-helper` | OpenVPN PKCS#11 dependency |
 | `openvpn-openssl` | `features/cra-03-key-storage/openvpn` | OpenVPN with PKCS#11 support |
 
@@ -74,7 +74,7 @@ interactively instead:
 make menuconfig
 # Libraries             → libtropic
 # Libraries             → libtropic-pkcs11
-# Libraries             → lt-util
+# Libraries             → tropicctl
 # Libraries             → pkcs11-helper
 # Network → VPN         → openvpn-openssl
 ```
@@ -120,7 +120,7 @@ cd /path/to/openwrt
 # Build individual packages
 make package PKG=libtropic
 make package PKG=libtropic-pkcs11
-make package PKG=lt-util
+make package PKG=tropicctl
 make package PKG=pkcs11-helper
 make package PKG=openvpn
 
@@ -140,7 +140,7 @@ All provisioning steps run **on the router** over SSH.
 ### 2.1 Verify SPI connectivity
 
 ```bash
-lt-util -i
+tropicctl info chip
 ```
 
 `-i` prints the chip identification block (no separate "connectivity" flag
@@ -160,7 +160,7 @@ Batch ID               = 0x0000FFFFFF
 ### 2.2 Generate the hardware key
 
 ```bash
-lt-util -e -g 0        # Generate P-256 key in ECC slot 0
+tropicctl ecc generate 0 --curve p256        # Generate P-256 key in ECC slot 0
 ```
 
 Expected:
@@ -173,7 +173,7 @@ The private key is generated inside TROPIC01 and **cannot be exported**.
 ### 2.3 Export the public key
 
 ```bash
-lt-util -e -d 0 /tmp/tropic_pub.bin
+tropicctl ecc pub 0 --out /tmp/tropic_pub.bin
 ```
 
 Expected:
@@ -219,7 +219,7 @@ EOF
 
 ### 3.2 Alternative: use the CSR from the device
 
-If the firmware version of `lt-util` supports CSR generation, you can use the
+If your tooling can make a CSR with the chip's key (the OpenSSL PKCS#11 provider can: see the user guide), you can use the
 resulting CSR directly:
 
 ```bash
@@ -281,7 +281,7 @@ wc -c /tmp/client.der   # typically 290–310 bytes (max 444 bytes for R-MEM)
 scp /tmp/client.der root@<router-ip>:/tmp/client.der
 
 # Router: write to R-MEM slot 1
-ssh root@<router-ip> 'lt-util -m -s 1 /tmp/client.der'
+ssh root@<router-ip> 'tropicctl mem write 1 --in /tmp/client.der'
 ```
 
 Expected:
@@ -414,7 +414,7 @@ Expected:
 | `OpenSSL: error:bad signature` on server | Double-hashing in ECDSA path | Ensure patch `005-add-ecdsa-sign-prehash.patch` is applied |
 | `Cannot open TUN/TAP dev /dev/net/tun` | `tun` module not loaded | `modprobe tun && echo tun > /etc/modules.d/tun` |
 | `ip link set failed: could not execute external program` | OpenVPN looking for `/usr/sbin/ip` | Add `iproute /sbin/ip` to client config |
-| No cert found in `--show-pkcs11-ids` | Cert not stored or wrong slot | Re-run step 4; verify `lt-util -m -s 1` returned `LT_OK` |
+| No cert found in `--show-pkcs11-ids` | Cert not stored or wrong slot | Re-run step 4; verify `tropicctl mem write 1` --in returned `LT_OK` |
 | TLS handshake timeout | Server log shows `bad signature` | Prehash patch missing (patch 005) |
 | Two clients get the same VPN IP | Same CN on both certs | Use unique CN per device when signing |
 
@@ -437,7 +437,7 @@ Expected:
 
 | File | Purpose |
 |---|---|
-| `/usr/bin/lt-util` | TROPIC01 provisioning tool |
+| `/usr/bin/tropicctl` (and the `lt-util` symlink) | TROPIC01 command-line tool |
 | `/usr/lib/libtropic_pkcs11.so` | PKCS#11 provider |
 | `/etc/openvpn/ca.crt` | VPN CA certificate |
 | `/etc/openvpn/ta.key` | TLS-crypt pre-shared key |
