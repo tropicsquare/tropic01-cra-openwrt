@@ -18,7 +18,7 @@ static const struct { const char *opt, *text; } GLOBALS[] = {
     {"--gpio-dev PATH", "GPIO chip (default " TROPICCTL_GPIO_DEV ")"},
     {"--cs-pin N", "chip-select GPIO line (default " "25" ")"},
     {"--spi-speed HZ", "SPI clock (default " "1000000" ")"},
-    {"--key SOURCE", "pairing key: auto (default), shared or es01 (engineering sample), prod0 (production), unit, file:PATH:SLOT, pin"},
+    {"--key SOURCE", "pairing key: auto (default), shared (the slot-0 key set by TROPICCTL_SH0 or <key dir>/slot0-key: es01 or prod0), es01, prod0, unit, file:PATH:SLOT, pin"},
     {"--pin-file FILE, --pin-stdin", "where a PIN comes from (never the command line); otherwise a terminal prompt"},
     {"--json", "machine-readable output on stdout; errors as a JSON object on stderr"},
     {"-q, -v", "quiet / verbose notices on stderr"},

@@ -14,6 +14,23 @@ check "--key es01 opens a session on an engineering chip" 0 "$(rc --key es01 ses
 check "--key prod0 is refused by an engineering chip: exit 4" 4 "$(rc --key prod0 session test)"
 check "an unknown key name is a usage error" 2 "$(rc --key prod1 session test)"
 
+echo "# the default slot-0 key setting (TROPICCTL_SH0 or <key dir>/slot0-key)"
+rm -rf chip keys && mkdir keys; TROPICCTL_FAKE_SH0=prod0 T info fw >/dev/null 2>&1
+check "a production chip refuses the default shared key: exit 4" 4 "$(rc session test)"
+check_contains "and the hint says how to set it once" "echo prod0 >" "$(cat err.txt)"
+check "TROPICCTL_SH0=prod0 makes the default shared key prod0" 0 "$(TROPICCTL_SH0=prod0 rc session test)"
+check_contains "and the warning names it" "shared production (prod0)" "$(cat err.txt)"
+echo prod0 > keys/slot0-key
+check "<key dir>/slot0-key does the same without the environment" 0 "$(rc session test)"
+check "--key shared follows the setting" 0 "$(rc --key shared session test)"
+check "the environment overrides the file" 4 "$(TROPICCTL_SH0=es01 rc session test)"
+echo bogus > keys/slot0-key
+check "an unknown name is refused, not ignored: exit 4" 4 "$(rc session test)"
+check_contains "naming the setting" "is not es01 or prod0" "$(cat err.txt)"
+fresh
+check "an engineering chip still works with no setting at all" 0 "$(rc session test)"
+check_contains "and the warning keeps its old wording" "shared engineering-sample key" "$(cat err.txt)"
+
 echo "# chip reboot"
 fresh
 check "chip reboot" 0 "$(rc chip reboot)"

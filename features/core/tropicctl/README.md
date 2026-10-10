@@ -82,3 +82,17 @@ be moved to its own repository.
 ## Licence
 
 BSD 3-Clause, see [LICENSE](LICENSE).
+
+## Which slot-0 key a chip answers to
+
+Every chip ships with a shared key in pairing slot 0, published with libtropic. Engineering samples use the ES01 key;
+chips with production provisioning use the prod0 key and refuse ES01 (`secure session failed: LT_CRYPTO_ERR`).
+`tropicctl info chip` and `fw status` work either way, because they need no session. To say once which one a unit has:
+
+```sh
+echo prod0 > /etc/tropic01/slot0-key     # or es01 (the default); TROPICCTL_SH0=prod0 overrides it for one command
+```
+
+`--key shared` and the fallback used when no per-unit key exists follow that setting. The `libtropic-pkcs11` module
+(OpenVPN through the chip) reads the same file, so one setting covers both. An unknown name is an error, not a silent
+fallback. A build can change the default with `TROPICCTL_DEFAULT_SH0=prod0`.

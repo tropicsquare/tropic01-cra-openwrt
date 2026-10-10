@@ -50,6 +50,41 @@ static int read_slot_file(const char *path, int *slot)
 	return 1;
 }
 
+/*
+ * The slot-0 key the chip answers to: "es01" (engineering sample) or "prod0" (production). A chip with production
+ * provisioning refuses ES01. Taken from $TROPICCTL_SH0, else the first line of <key dir>/slot0-key, else the build's
+ * default (TROPICCTL_DEFAULT_SH0, "es01"). An unknown name is an error rather than a silent fallback.
+ */
+#ifndef TROPICCTL_DEFAULT_SH0
+#define TROPICCTL_DEFAULT_SH0 "es01"
+#endif
+static int shared_key(pairing_key_t *out, char *desc, size_t dl, int announce)
+{
+	char name[16] = {0}, path[300];
+	const char *env = getenv("TROPICCTL_SH0");
+	if (env && *env) snprintf(name, sizeof name, "%s", env);
+	else {
+		FILE *f;
+		snprintf(path, sizeof path, "%s/slot0-key", keys_dir());
+		if ((f = fopen(path, "r"))) {
+			if (!fgets(name, sizeof name, f)) name[0] = '\0';
+			fclose(f);
+			name[strcspn(name, "\r\n")] = '\0';
+		}
+		if (!name[0]) snprintf(name, sizeof name, "%s", TROPICCTL_DEFAULT_SH0);
+	}
+	if (!chip_named_key(name, out))
+		return out_error(TC_SESSION, "the slot-0 key setting '%s' is not es01 or prod0 ($TROPICCTL_SH0 or %s/slot0-key)", name, keys_dir());
+	if (strcmp(name, "prod0") == 0) {
+		if (announce) out_notice("using the shared production (prod0) slot-0 key");
+		snprintf(desc, dl, "shared production (prod0) slot-0 key");
+	} else {
+		if (announce) out_notice("using the shared engineering-sample key (slot 0)");
+		snprintf(desc, dl, "shared engineering-sample key, slot 0");
+	}
+	return TC_OK;
+}
+
 static int use_unit(pairing_key_t *out, char *desc, size_t dl, int must_exist)
 {
 	char privf[300], pubf[300], slotf[300];
@@ -59,9 +94,9 @@ static int use_unit(pairing_key_t *out, char *desc, size_t dl, int must_exist)
 	snprintf(slotf, sizeof slotf, "%s/pairing.slot", keys_dir());
 	if (access(privf, F_OK) != 0) {
 		if (must_exist) return out_error(TC_SESSION, "no per-unit pairing key (%s)", privf);
-		out_warn("no per-unit pairing key (%s), using the shared engineering-sample key", privf);
-		chip_shared_key(out);
-		snprintf(desc, dl, "shared engineering-sample key, slot 0");
+		int rc;
+		if ((rc = shared_key(out, desc, dl, 0))) return rc;
+		out_warn("no per-unit pairing key (%s), using the %s", privf, strstr(desc, "prod0") ? "shared production (prod0) slot-0 key" : "shared engineering-sample key");
 		return TC_OK;
 	}
 	if (!read_slot_file(slotf, &slot) || !load_pair(privf, pubf, slot, out))
@@ -78,12 +113,7 @@ int keys_select(const char *source, pairing_key_t *out, char *desc, size_t descl
 {
 	if (!source || strcmp(source, "auto") == 0) return use_unit(out, desc, desclen, 0);
 	if (strcmp(source, "unit") == 0) return use_unit(out, desc, desclen, 1);
-	if (strcmp(source, "shared") == 0) {
-		chip_shared_key(out);
-		out_notice("using the shared engineering-sample key (slot 0)");
-		snprintf(desc, desclen, "shared engineering-sample key, slot 0");
-		return TC_OK;
-	}
+	if (strcmp(source, "shared") == 0) return shared_key(out, desc, desclen, 1);
 	if (strncmp(source, "file:", 5) == 0) {
 		char path[300], pubf[310];
 		const char *colon = strrchr(source + 5, ':');

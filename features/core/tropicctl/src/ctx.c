@@ -142,7 +142,7 @@ int ctx_session(ctx_t *x)
 	if (st != CHIP_OK) {
 		rc = out_chip_error(st, "secure session failed", err);
 		if (st == CHIP_E_SESSION && (!x->key_source || strcmp(x->key_source, "shared") == 0 || strcmp(x->key_source, "es01") == 0 || strcmp(x->key_source, "auto") == 0) && x->key.slot == 0)
-			out_notice("hint: a chip with production provisioning uses the prod0 slot-0 key; try --key prod0");
+			out_notice("hint: a chip with production provisioning refuses this key and uses the prod0 slot-0 key; try --key prod0, or set it once: echo prod0 > %s/slot0-key (or TROPICCTL_SH0=prod0)", keys_dir());
 		return rc;
 	}
 	x->have_session = 1;

@@ -45,6 +45,7 @@ endef
 
 CMAKE_OPTIONS += \
 	-DTROPICCTL_CHIP=libtropic \
+	-DTROPICCTL_DEFAULT_SH0=$(or $(TROPICCTL_DEFAULT_SH0),es01) \
 	-DLIBTROPIC_SRC=$(STAGING_DIR)/usr/src/libtropic
 
 define Package/tropicctl/install
