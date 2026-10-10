@@ -10,7 +10,7 @@
 #include "files.h"
 #include "output.h"
 
-static const char *key_dir(void)
+const char *keys_dir(void)
 {
 	const char *d = getenv("TROPICCTL_KEY_DIR");
 	return d && *d ? d : "/etc/tropic01";
@@ -54,9 +54,9 @@ static int use_unit(pairing_key_t *out, char *desc, size_t dl, int must_exist)
 {
 	char privf[300], pubf[300], slotf[300];
 	int slot;
-	snprintf(privf, sizeof privf, "%s/pairing.key", key_dir());
-	snprintf(pubf, sizeof pubf, "%s/pairing.pub", key_dir());
-	snprintf(slotf, sizeof slotf, "%s/pairing.slot", key_dir());
+	snprintf(privf, sizeof privf, "%s/pairing.key", keys_dir());
+	snprintf(pubf, sizeof pubf, "%s/pairing.pub", keys_dir());
+	snprintf(slotf, sizeof slotf, "%s/pairing.slot", keys_dir());
 	if (access(privf, F_OK) != 0) {
 		if (must_exist) return out_error(TC_SESSION, "no per-unit pairing key (%s)", privf);
 		out_warn("no per-unit pairing key (%s), using the shared engineering-sample key", privf);

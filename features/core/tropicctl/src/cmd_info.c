@@ -1,7 +1,10 @@
 #include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
 
 #include "cmd_table.h"
 #include "errors.h"
+#include "files.h"
 #include "output.h"
 
 int cmd_info_chip(ctx_t *x, args_t *a)
@@ -54,5 +57,51 @@ int cmd_info_fw(ctx_t *x, args_t *a)
 		printf("RISCV_FW_VER %02x %02x %02x %02x\nSPECT_FW_VER %02x %02x %02x %02x\n", r[0], r[1], r[2], r[3], s[0], s[1],
 		       s[2], s[3]);
 	}
+	return TC_OK;
+}
+
+int cmd_info_mode(ctx_t *x, args_t *a)
+{
+	const cmd_t *c = cmd_find("info", "mode");
+	char err[CHIP_ERRLEN] = "";
+	const char *bad, *name;
+	chip_mode_t m;
+	chip_status_t st;
+	int rc;
+	if (args_unknown(a, &bad)) return cmd_usage(c, bad);
+	if ((rc = ctx_chip(x))) return rc;
+	st = chip_mode(x->chip, &m, err);
+	if (st != CHIP_OK) return out_chip_error(st, "cannot read the chip mode", err);
+	name = m == CHIP_MODE_APPLICATION ? "application" : m == CHIP_MODE_MAINTENANCE ? "maintenance" : "unknown";
+	if (g_json) printf("{\"mode\":\"%s\"}\n", name);
+	else printf("%s\n", name);
+	return TC_OK;
+}
+
+int cmd_info_cert(ctx_t *x, args_t *a)
+{
+	const cmd_t *c = cmd_find("info", "cert");
+	char err[CHIP_ERRLEN] = "", path[400];
+	const char *dir = NULL, *bad;
+	static uint8_t certs[CHIP_CERTS][CHIP_CERT_MAX];
+	size_t len[CHIP_CERTS];
+	chip_status_t st;
+	int rc;
+	if (args_value(a, "--out-dir", &dir) < 0) return cmd_usage(c, "--out-dir needs a value");
+	if (args_unknown(a, &bad)) return cmd_usage(c, bad);
+	if ((rc = ctx_chip(x))) return rc;
+	st = chip_certs(x->chip, certs, len, err);
+	if (st != CHIP_OK) return out_chip_error(st, "cannot read the certificate store", err);
+	if (dir) mkdir(dir, 0700);
+	if (g_json) printf("{\"certificates\":[");
+	for (int i = 0; i < CHIP_CERTS; i++) {
+		if (dir && len[i]) {
+			snprintf(path, sizeof path, "%s/cert%d.der", dir, i);
+			if (file_write(path, certs[i], len[i]) != 0) return out_error(TC_INTERNAL, "cannot write %s", path);
+		}
+		if (g_json) printf("%s{\"index\":%d,\"bytes\":%zu}", i ? "," : "", i, len[i]);
+		else printf("certificate %d: %zu bytes\n", i, len[i]);
+	}
+	if (g_json) printf("]}\n");
 	return TC_OK;
 }

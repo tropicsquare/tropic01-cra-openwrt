@@ -1,6 +1,6 @@
 # tropicctl: a command-line tool for TROPIC01 on Linux (specification draft)
 
-**Status: all decisions made (section 12); phase 1 implemented and run read-only on the bench chip (2026-10-10).** This document defines what the tool does, how it behaves and how it
+**Status: all decisions made (section 12); phases 1 to 4 implemented. Phase 1 was run read-only on the bench chip; everything that writes the chip is tested against the fake chip only, until a spare chip is available.** This document defines what the tool does, how it behaves and how it
 is tested, so that the interface can be agreed before it is built. It replaces the patched `lt-util` that this feed
 carries today and is written so that it could also be used outside this project.
 
@@ -71,7 +71,13 @@ src/lock.c            the lock file around the chip
 src/output.c          text and JSON writers, error reporting
 src/errors.c          libtropic status -> exit code and message
 src/safety.c          confirmation flags, refusal rules, read-back helpers
-src/cmd_info.c  cmd_rng.c  cmd_ecc.c  cmd_mem.c  cmd_pairing.c  cmd_config.c  cmd_mnd.c  cmd_counter.c
+src/crypto.c          host-side cryptography (OpenSSL): keyed hash, AES-GCM, randomness, encoders
+src/uap.c             the access-word layout: kinds of objects, who may do what, decoding
+src/cfgfile.c         configuration files (the raw words `config dump` prints)
+src/mnd.c             the PIN scheme of the application note
+src/pin.c             reading a PIN without the command line
+src/ecc_host.c        ECC with OpenSSL, used only by the fake chip
+src/cmd_info.c  cmd_rng.c  cmd_ecc.c  cmd_mem.c  cmd_pairing.c  cmd_config.c  cmd_mnd.c  cmd_counter.c  cmd_session.c  cmd_help.c
 docs/                 generated manual page and reference
 tests/                unit tests, fake-chip command tests, hardware test scripts
 ```
@@ -100,12 +106,15 @@ tropicctl help [area [verb]]      tropicctl version
 
 ### 4.2 Global options
 
+Global options are accepted anywhere on the command line, before or after the command.
+
 | Option | Meaning | Default |
 |---|---|---|
 | `--spi-dev PATH` | SPI device | `/dev/spidev2.0` (build-time default; also `TROPIC01_SPI_DEV`) |
 | `--gpio-dev PATH`, `--cs-pin N` | GPIO chip and chip-select line | `/dev/gpiochip0`, 25 |
 | `--spi-speed HZ` | SPI clock | 1000000 |
 | `--key SOURCE` | which pairing key opens the session (section 5) | `auto` |
+| `--pin-file FILE`, `--pin-stdin` | where a PIN comes from (never the command line); otherwise a terminal prompt | |
 | `--json` | machine-readable output on stdout | off |
 | `-q`, `-v` | quiet / verbose notices on stderr | normal |
 | `--lock-timeout SEC` | how long to wait for the chip lock | 10 |
@@ -157,7 +166,7 @@ One invocation opens one secure session and closes it. The key source is `--key`
 | `shared` | the shared engineering-sample key (slot 0); needed to write the per-unit key |
 | `unit` | the per-unit key files only; error if absent |
 | `file:PATH:SLOT` | an explicit key file and slot |
-| `pin` | the PIN-protected key of tier 1 in the cra-04 design: open a bootstrap session, run MAC-and-Destroy with the PIN, decrypt the protected key, open the real session |
+| `pin` | the PIN-protected key of tier 1 in the cra-04 design: open a bootstrap session with the per-unit key, run MAC-and-Destroy with the PIN (`pin.state`, optional `pin.add`), decrypt the protected private key (`protected.enc`, sealed with `mnd seal`) for the pairing slot in `protected.slot`, end the bootstrap session and open the real one. A wrong PIN uses an attempt; with none left the key can never be opened again |
 
 `tropicctl session test [--key SOURCE]` opens and closes a session and reports which key and slot were used.
 
@@ -176,8 +185,8 @@ Arguments in `<>` are required. Slot numbers are validated before the chip is to
 | Command | Does |
 |---|---|
 | `info chip` | chip identification (what `lt-util -i` prints), as text or `--json` |
-| `info fw` | RISC-V and SPECT firmware version bytes, and the decoded version where known |
-| `info cert [--out FILE]` | the chip's certificate store; verify chain with `--verify` |
+| `info fw` | RISC-V and SPECT firmware version bytes as the chip reports them |
+| `info cert [--out-dir DIR]` | the chip's certificate store: the length of each certificate, and with `--out-dir` each as `certN.der`; verifying the chain is not done |
 | `info mode` | whether the chip is in application, maintenance or start-up mode |
 
 ### 7.2 `rng` (R)
@@ -189,11 +198,11 @@ Arguments in `<>` are required. Slot numbers are validated before the chip is to
 | Command | Class | Does |
 |---|---|---|
 | `ecc list` | R | for each of the 32 slots: empty, or curve and origin (generated or stored) |
-| `ecc generate <slot> --curve p256\|ed25519` | W | generate a key in the chip. Refuses an occupied slot unless `--replace` |
-| `ecc store <slot> --curve p256\|ed25519 --in FILE` | W | store a private key from a file (libtropic accepts both curves); the key's origin is then "stored", not "generated", which matters for trust |
-| `ecc pub <slot> [--out FILE] [--format raw\|pem]` | R | the public key; `pem` writes a standard SubjectPublicKeyInfo |
-| `ecc erase <slot>` | W | erase a key |
-| `ecc sign <slot> --in FILE [--alg ecdsa\|eddsa] [--digest]` | R | sign. ECDSA signs a 32-byte hash (`--digest` says the input is already a digest, otherwise the tool hashes it with SHA-256); EdDSA signs the message. The algorithm defaults from the slot's curve; a mismatch is an error, not a wrong answer |
+| `ecc generate <slot> --curve p256\|ed25519 [--replace --yes-erase-ecc-key]` | W | generate a key inside the chip; an occupied slot is refused, `--replace` erases it first and needs the flag because the old key is lost for good; read back and checked |
+| `ecc store <slot> --curve p256\|ed25519 --in FILE [--replace --yes-erase-ecc-key]` | W | store a 32-byte private key from a file; its origin is then "stored", not "generated", which matters for trust |
+| `ecc pub <slot> [--out FILE\|-] [--format raw\|pem]` | R | the public key (raw 64 bytes X\|\|Y for P-256, 32 bytes for Ed25519, or a SubjectPublicKeyInfo PEM) |
+| `ecc erase <slot> --yes-erase-ecc-key` | **I** | destroys the key for good (a generated key cannot be recreated), checks the slot reads empty |
+| `ecc sign <slot> --in FILE [--out FILE\|-] [--alg ecdsa\|eddsa] [--digest] [--der]` | R | ECDSA signs a 32-byte hash (the input is hashed with SHA-256 unless `--digest` says it already is a digest); EdDSA signs the message (up to 4095 bytes). The algorithm follows the slot's curve; a mismatch is refused, not answered wrongly. Output is 64 raw bytes, or DER with `--der` |
 
 ### 7.4 `mem` (R-MEM data slots 0 to 511; 444 bytes, 475 on libtropic 4.2)
 
@@ -215,36 +224,56 @@ Arguments in `<>` are required. Slot numbers are validated before the chip is to
 
 ### 7.6 `config`
 
+The access objects are described by libtropic's headers and its hardware-wallet example: four bytes per object, one byte
+per group of targets (ECC slots in groups of 8, counters in groups of 4, MAC-and-Destroy slots in groups of 32, one
+byte per pairing slot for the pairing-key commands, byte 0 only for single-target commands), the four low bits of a
+byte standing for pairing keys 0 to 3, a set bit granting access. The file format is the raw words `config dump`
+prints, so nothing is invented between the file and the chip.
+
 | Command | Class | Does |
 |---|---|---|
-| `config dump [--decode]` | R | every R-config and I-config object (`R\|I NAME 0xVALUE`); `--decode` adds the access rights per command, slot group and pairing key |
-| `config get <name>` | R | one object |
-| `config diff <file>` | R | compare the chip's R-config with a file |
-| `config rewrite --in FILE --yes-rewrite-r-config` | **H** | validate the file, save the current R-config next to it, **erase, write, read back**, compare. If the write fails after the erase the tool says so and prints the backup path. Refuses a file that would lock the session's own pairing key out of reconfiguring |
-| `config restore --in BACKUP --yes-rewrite-r-config` | **H** | same sequence from a backup |
-| `config burn <name> <bit> --yes-burn-i-config-bit` | **I** | clear one I-config bit (one-way); allowed only on firmware that reports write errors (2.0.0 or newer); read back |
+| `config dump [--decode]` | R | every R-config and I-config object (`R\|I NAME 0xVALUE`); `--decode` adds which keys may use each command on which target group |
+| `config get <name>` | R | one object (the `TR01_CFG_` prefix may be left out) |
+| `config diff --in FILE [--check]` | R | compare the chip's R-config with a file, naming which pairing keys gain or lose access; `--check` exits 8 if anything differs |
+| `config restrict-shared --unit-slot N [--out FILE\|-]` | R | build a file from the chip's current R-config with pairing key 0 (the shared key) removed from every access object except PING. Refuses unless slot N holds a key and has the right to read and rewrite the configuration. Changes nothing on the chip |
+| `config rewrite --in FILE --yes-rewrite-r-config [--backup FILE] [--include-non-access]` | **H** | validate, save the current R-config to a backup, **erase, write, read back**. Refuses a file that would take the right to read or rewrite the configuration from the key of this session, a file that changes objects that are not access rights (unless `--include-non-access`), and any case where the backup cannot be written. If the write fails after the erase it says so and names the backup |
+| `config restore --in BACKUP --yes-rewrite-r-config` | **H** | the same sequence for a backup file |
+| `config burn <name> <bit> --yes-burn-i-config-bit` | **I** | clear one I-config bit (one-way); refused unless the firmware version bytes show CPU firmware 2.0.0 or newer; read back |
 
-There is no raw "write one R-config object" command, because the chip's erratum makes it dangerous.
+There is no raw "write one R-config object" command, because the chip's erratum makes it dangerous: only
+`chip_rconfig_rewrite()` writes the R-config, and it always erases first.
 
 ### 7.7 `mnd`: MAC-and-Destroy (PIN verification)
 
-Implements the vendor's PIN-verification scheme on libtropic's `lt_mac_and_destroy()`, not hand-written code.
+Implements the vendor's PIN-verification scheme (application note ODN_TR01_app_002) on the chip's MAC-and-Destroy
+sequence. The PIN (4 to 8 characters) comes from `--pin-file`, `--pin-stdin` or a terminal prompt; additional data from a
+file, because it is secret too.
 
 | Command | Class | Does |
 |---|---|---|
-| `mnd setup --state FILE [--pin-file F] [--add HEX] [--slots N] [--secret-file F]` | **I** | the new-PIN procedure; writes the host-side state (ciphertexts, tag, counter) to FILE; the chip's slots are consumed |
-| `mnd check --state FILE [--pin-file F] [--add HEX] --out FILE` | W | the PIN entry check; on success writes the released 32-byte key, on failure a destroyed slot has been used up |
-| `mnd status --state FILE` | R | remaining attempts according to the host state |
+| `mnd setup --state FILE --out KEYFILE --yes-setup-mnd [--slots N] [--base-slot B] [--add-file F] [--replace]` | **I** | the new-PIN procedure: initialises N chip slots (default 5) from slot B, writes the host state (ciphertexts, tag, attempts left; needs no protection) and the released 32-byte key. Refuses to overwrite an existing state |
+| `mnd check --state FILE --out KEYFILE [--add-file F]` | W | the PIN entry check. **The decremented attempt count is saved before the chip is touched.** A wrong PIN is exit 8 and uses an attempt; with none left the key can never be released (exit 9) |
+| `mnd status --state FILE` | R | attempts left according to the host state (no chip access) |
+| `mnd seal --key-file K --in FILE --out FILE` | R | AES-256-GCM encrypt a file (for the protected pairing key) under a released key; host only |
+| `mnd unseal --key-file K --in FILE --out FILE` | R | the reverse; exit 8 if the key is wrong or the file damaged |
 
-PIN length 4 to 8 characters, additional data up to 128 bytes, as in the vendor note. Wiping-PIN and multi-PIN
-extensions are later work.
+The master-secret input and the multiple-PIN and wiping-PIN extensions of the note are not implemented.
 
 ### 7.8 `counter` (monotonic counters, for rollback protection)
 
-`counter get <n>` (R), `counter init <n> <value> --yes-init-counter` (**I**; the value must be in 0 to the library's
-`TR01_MCOUNTER_VALUE_MAX`), `counter update <n> --yes-update-counter` (**I**). libtropic's header does not say which
-direction an update moves the counter or what happens at the limit; **both must be confirmed from the datasheet
-before this command is written**, and the tool must refuse an update it knows would pass the limit.
+Confirmed from libtropic's functional test (`lt_test_rev_mcounter`): a counter holds 0 to 0xFFFFFFFE; `init` may be
+called again at any time; `update` decrements by one; an update at zero fails. The datasheet defines no default value, so
+an uninitialised counter is reported as not found.
+
+| Command | Class | Does |
+|---|---|---|
+| `counter get <n>` | R | read a counter (0 to 15) |
+| `counter init <n> <value> --yes-init-counter` | **I** | set a counter, read back |
+| `counter update <n> --yes-update-counter` | **I** | decrement by one, read back; refused when it is already 0 |
+
+Both write commands are classed I even though `init` can be repeated: the point of a rollback counter is that nobody can
+raise it again, and that holds only once the chip's access rights remove the `MCOUNTER_INIT` right from every pairing key.
+That is a configuration step (`config rewrite`), not something this command does.
 
 ### 7.9 `session test`
 
@@ -314,7 +343,7 @@ legacy mode, except the two survey commands that already exist (`-x -r`, `-x -f`
 | `lt-util -r <n> <file>` | `tropicctl rng get <n> --out <file>` |
 | `lt-util -e -g <slot>` | `tropicctl ecc generate <slot> --curve p256` |
 | `lt-util -e -d <slot> <file>` | `tropicctl ecc pub <slot> --out <file>` |
-| `lt-util -e -c <slot>` | `tropicctl ecc erase <slot>` |
+| `lt-util -e -c <slot>` | `tropicctl ecc erase <slot> --yes-erase-ecc-key` (legacy mode supplies the flag: the old tool had no gate) |
 | `lt-util -e -i <slot> <file>` | `tropicctl ecc store <slot> --curve ed25519 --in <file>` (the old command only stores Ed25519) |
 | `lt-util -e -s <slot> <in> <out>` | `tropicctl ecc sign <slot> --in <in> --out <out>` (now also correct for P-256 slots) |
 | `lt-util -m -s <slot> <file>` | `tropicctl mem write <slot> --in <file>` |
@@ -353,12 +382,17 @@ Confirmed by the project owner on 2026-10-10 (proposals accepted):
 
 ## 13. Phases and acceptance
 
-Version 1.0 contains every area; the phases only order the work. Each phase ends on real hardware.
+Version 1.0 contains every area. Status on 2026-10-11:
 
-| Phase | Deliverable | Done when |
+| Phase | Deliverable | Status |
 |---|---|---|
-| 0 | this specification reviewed; decisions 1 to 7 made | recorded in section 12 (done) |
-| 1 | **done**: skeleton: chip interface and fake, option parsing, command table, session, lock, output, exit codes; `info`, `rng`, `mem`, `pairing list/read`, `config dump`, `session test`; **legacy mode for the read-only and R-MEM commands**; generated help and manual page; 138 unit and fake-chip tests | builds in the feed; the bench read-only checks pass against the real chip (hardware report) |
-| 2 | `ecc`, `pairing write/invalidate`, `config rewrite/restore/diff/burn`; the rest of legacy mode; guard-breaking tests | fake-chip suite passes; spare-chip run documented |
-| 3 | callers migrated; `lt-util` patches retired | the full hardware suite (56 checks) and an OpenVPN tunnel pass on the new tool |
-| 4 | `mnd`, `counter`; PIN-protected sessions (`--key pin`) for cra-04 tier 1 | spare-chip run documented; counter semantics confirmed from the datasheet first |
+| 0 | specification reviewed; decisions 1 to 7 made | **done** |
+| 1 | skeleton, chip interface and fake, `info`, `rng`, `mem`, `pairing list/read`, `config dump`, `session test`, legacy mode for the read-only and R-MEM commands, generated help and manual page | **done**; run read-only on the bench chip |
+| 2 | `ecc`, `pairing write/invalidate`, `config get/diff/restrict-shared/rewrite/restore/burn`, the rest of legacy mode, guard-breaking tests | **done against the fake chip** (signatures verified by OpenSSL; every guard checked by mutation); **not run on a spare chip**; the real-chip build compiles |
+| 3 | callers migrated (vault, AWS provisioning script, bench, docs); the `lt-util` package and its patches retired; `lt-util` kept as a symlink | **done in the tree**; the bench's read-only `cra04` run and the vault run on the real chip pass on the new binary; the full hardware suite on a flashed image is still to run |
+| 4 | `mnd`, `counter`, PIN-protected sessions (`--key pin`) | **done against the fake chip**; not run on a spare chip |
+
+What is still unconfirmed on a real chip, because it needs a write that is not safe on the bench unit: the access-word layout
+as the chip applies it (it is libtropic's own description), the effect of erasing the R-config, the MAC-and-Destroy sequence's
+behaviour with the host scheme, and the counter commands. Each fake rule that depends on one of these is marked `[assumed]`
+in `src/chip_fake.c`.

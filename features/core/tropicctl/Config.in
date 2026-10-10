@@ -1,0 +1,13 @@
+config PACKAGE_tropicctl
+	bool "tropicctl - command-line tool for the TROPIC01 secure element"
+	depends on PACKAGE_libtropic
+	select PACKAGE_libopenssl
+	help
+	  tropicctl talks to a TROPIC01 secure element over Linux SPI and GPIO:
+	  chip and firmware information, random numbers, ECC keys, R-MEM data,
+	  pairing keys, the chip configuration, MAC-and-Destroy PIN verification
+	  and monotonic counters. Every command has a safety class; commands that
+	  cannot be undone need an explicit confirmation flag.
+
+	  Started under the name lt-util (a symlink this package installs) it
+	  accepts the old lt-util command line.

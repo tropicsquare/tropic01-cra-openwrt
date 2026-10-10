@@ -68,7 +68,7 @@ check_contains "and warns on stderr" "no per-unit pairing key" "$(cat err.txt)"
 check_contains "and says which key opened it" "shared engineering-sample key, slot 0" "$(cat out.txt)"
 check "--key unit without files refused" 4 "$(rc --key unit session test)"
 check "--key shared" 0 "$(rc --key shared session test)"
-check "--key pin is not available yet" 9 "$(rc --key pin session test)"
+check "--key pin without the PIN-protected key files is refused" 4 "$(rc --key pin session test)"
 check "unknown key source" 2 "$(rc --key bogus session test)"
 head -c 32 /dev/urandom > keys/pairing.key; echo 1 > keys/pairing.slot; head -c 5 /dev/urandom > keys/pairing.pub
 check "unusable per-unit files: refused" 4 "$(rc session test)"
@@ -228,8 +228,8 @@ check "lt-util -x -f" 0 "$(lrc -x -f)"
 check_contains "firmware line as before" "RISCV_FW_VER 00 02 01 00" "$(cat out.txt)"
 check "lt-util -x -r" 0 "$(lrc -x -r)"
 check "54 lines" 54 "$(wc -l < out.txt | tr -d ' ')"
-check "an old command not available yet fails with 1" 1 "$(lrc -e -g 0)"
-check_contains "and says so" "not available in this build yet" "$(cat err.txt)"
+check "an unknown old command fails with 1" 1 "$(lrc -z -z)"
+check_contains "and says so" "wrong parameters" "$(cat err.txt)"
 check "the deprecation notice appears unless silenced" yes "$(TROPICCTL_NO_DEPRECATION="" TROPICCTL_ARGV0=lt-util "$BIN" -x -f 2>&1 >/dev/null | grep -q 'compatibility mode' && echo yes || echo no)"
 check "LT_UTIL_FORCE_SHARED_KEY selects the shared key" 0 "$(setkey 1; LT_UTIL_FORCE_SHARED_KEY=1 lrc -m -r 3 x.bin >/dev/null; rm -f chip/rmem/3; LT_UTIL_FORCE_SHARED_KEY=1 TROPICCTL_ARGV0=lt-util "$BIN" -m -s 3 in.bin >/dev/null 2>&1; echo $?)"
 fresh; setkey 1
@@ -241,5 +241,8 @@ check_contains "with the old 'Error sec channel' phrase" "Error sec channel" "$(
 head -c 5 /dev/urandom > keys/pairing.pub
 check "legacy: unusable key files fail with 1" 1 "$(lrc -m -r 4 x.bin)"
 check_contains "and say 'unusable'" "unusable" "$(cat err.txt)"
+
+# shellcheck source=cases_phase2.sh
+. "$HERE/cases_phase2.sh"
 
 finish

@@ -23,6 +23,7 @@ define Package/tropicctl
   TITLE:=Command-line tool for the TROPIC01 secure element
   URL:=https://github.com/tropicsquare/tropic01-cra-openwrt
   DEPENDS:=+libtropic +libopenssl
+  PROVIDES:=lt-util
 endef
 
 define Package/tropicctl/description
@@ -32,7 +33,8 @@ define Package/tropicctl/description
   class on every command. Started under the name lt-util it accepts the old
   lt-util command line.
 
-  Draft (phase 1 of SPEC.md): not selected in any image configuration yet.
+  Replaces the patched lt-util: the package installs an lt-util symlink for
+  the compatibility mode.
 endef
 
 # The sources are in this directory (nothing is downloaded).
@@ -48,6 +50,8 @@ CMAKE_OPTIONS += \
 define Package/tropicctl/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/tropicctl $(1)/usr/bin/tropicctl
+	# started under this name the program accepts the old lt-util command line
+	$(LN) tropicctl $(1)/usr/bin/lt-util
 endef
 
 $(eval $(call BuildPackage,tropicctl))

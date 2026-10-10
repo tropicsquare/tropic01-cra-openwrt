@@ -14,4 +14,7 @@
  */
 int keys_select(const char *source, pairing_key_t *out, char *desc, size_t desclen);
 
+/* the directory holding the per-unit key files and the PIN-protected key files */
+const char *keys_dir(void);
+
 #endif

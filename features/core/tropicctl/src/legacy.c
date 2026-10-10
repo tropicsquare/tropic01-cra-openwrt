@@ -17,14 +17,20 @@ static void usage(void)
 	printf("\nUsage (lt-util compatibility mode of tropicctl):\n\n"
 	       "\t./lt-util -i                              # Print chip identification\n"
 	       "\t./lt-util -r    <count> <file>            # Random  - Get 2-255 random bytes and store them into file\n"
+	       "\t./lt-util -e -i <slot> <file>             # ECC key - Install an Ed25519 private key from file into a slot (0-31)\n"
+	       "\t./lt-util -e -g <slot>                    # ECC key - Generate a P-256 private key in a slot (0-31)\n"
+	       "\t./lt-util -e -d <slot> <file>             # ECC key - Download the public key of a slot into file\n"
+	       "\t./lt-util -e -c <slot>                    # ECC key - Clear (erase) an ECC slot\n"
+	       "\t./lt-util -e -s <slot> <file1> <file2>    # ECC key - EdDSA-sign file1, store the signature in file2\n"
 	       "\t./lt-util -m -s <slot> <file>             # Memory  - Store content of file into memory slot (0-511)\n"
 	       "\t./lt-util -m -r <slot> <file>             # Memory  - Read content of memory slot (0-511) into file\n"
 	       "\t./lt-util -m -e <slot>                    # Memory  - Erase content of memory slot (0-511)\n"
 	       "\t./lt-util -k -r <slot> <file>             # Pairing key - Read the public pairing key of a slot (0-3)\n"
+	       "\t./lt-util -k -w <slot> <file> --irreversible  # Pairing key - IRREVERSIBLE: write a 32-byte public key into an empty slot 1-3\n"
 	       "\t./lt-util -x -r                           # Survey  - Print every R-config and I-config object\n"
 	       "\t./lt-util -x -f                           # Survey  - Print the firmware version bytes\n\n"
 	       "\t All commands return 0 if success, otherwise 1.\n"
-	       "\t Other old commands (-e ..., -k -w ...) are not available in this build yet.\n\n");
+	       "\t The old commands keep their behaviour; new commands are available as tropicctl.\n\n");
 }
 
 static int run(ctx_t *x, const cmd_t *c, int argc, char **argv)
@@ -35,7 +41,7 @@ static int run(ctx_t *x, const cmd_t *c, int argc, char **argv)
 
 int legacy_main(int argc, char **argv, ctx_t *x)
 {
-	char *v[6];
+	char *v[8];
 
 	const char *quiet = getenv("TROPICCTL_NO_DEPRECATION");
 	if (!quiet || !*quiet)
@@ -74,10 +80,44 @@ int legacy_main(int argc, char **argv, ctx_t *x)
 			return run(x, cmd_find("mem", strcmp(argv[2], "-s") == 0 ? "write" : "read"), 3, v);
 		}
 	}
+	if (argc >= 4 && strcmp(argv[1], "-e") == 0) {
+		if (argc == 4 && strcmp(argv[2], "-g") == 0) {
+			v[0] = argv[3]; v[1] = "--curve"; v[2] = "p256";
+			return run(x, cmd_find("ecc", "generate"), 3, v);
+		}
+		if (argc == 4 && strcmp(argv[2], "-c") == 0) {
+			v[0] = argv[3]; v[1] = "--yes-erase-ecc-key"; /* the old tool erased without a confirmation */
+			return run(x, cmd_find("ecc", "erase"), 2, v);
+		}
+		if (argc == 5 && strcmp(argv[2], "-d") == 0) {
+			v[0] = argv[3]; v[1] = "--out"; v[2] = argv[4];
+			return run(x, cmd_find("ecc", "pub"), 3, v);
+		}
+		if (argc == 5 && strcmp(argv[2], "-i") == 0) {
+			v[0] = argv[3]; v[1] = "--curve"; v[2] = "ed25519"; v[3] = "--in"; v[4] = argv[4];
+			return run(x, cmd_find("ecc", "store"), 5, v);
+		}
+		if (argc == 6 && strcmp(argv[2], "-s") == 0) {
+			v[0] = argv[3]; v[1] = "--in"; v[2] = argv[4]; v[3] = "--out"; v[4] = argv[5]; v[5] = "--alg"; /* v has 6 slots */
+			{
+				char *w[8] = {argv[3], "--in", argv[4], "--out", argv[5], "--alg", "eddsa", NULL};
+				return run(x, cmd_find("ecc", "sign"), 7, w);
+			}
+		}
+	}
+	if (argc == 6 && strcmp(argv[1], "-k") == 0 && strcmp(argv[2], "-w") == 0) {
+		char *w[5];
+		if (strcmp(argv[5], "--irreversible") != 0) {
+			fprintf(stderr, "ERROR This write is irreversible: pass the literal argument --irreversible to confirm\n");
+			return 1;
+		}
+		w[0] = argv[3]; w[1] = "--in"; w[2] = argv[4]; w[3] = "--yes-write-pairing-slot";
+		return run(x, cmd_find("pairing", "write"), 4, w);
+	}
 	if (argc == 5 && strcmp(argv[1], "-k") == 0 && strcmp(argv[2], "-r") == 0) {
 		v[0] = argv[3]; v[1] = "--out"; v[2] = argv[4];
 		return run(x, cmd_find("pairing", "read"), 3, v);
 	}
-	fprintf(stderr, "ERROR wrong parameters entered, or this old command is not available in this build yet\n");
+	fprintf(stderr, "ERROR wrong parameters entered\n");
 	return 1;
 }

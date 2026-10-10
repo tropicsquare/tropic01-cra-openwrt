@@ -15,13 +15,16 @@ set(TROPICCTL_CS_PIN "25" CACHE STRING "default chip-select GPIO line")
 set(TROPICCTL_SPI_SPEED "1000000" CACHE STRING "default SPI speed in Hz")
 set(LIBTROPIC_SRC "" CACHE PATH "libtropic source tree (needed for TROPICCTL_CHIP=libtropic)")
 
+find_package(OpenSSL REQUIRED) # host-side cryptography (keyed hash, authenticated encryption); both variants
+
 set(SRC
     src/main.c src/cmd_table.c src/legacy.c src/ctx.c src/keys.c src/lock.c src/output.c src/errors.c src/args.c
     src/files.c src/cmd_info.c src/cmd_rng.c src/cmd_mem.c src/cmd_pairing.c src/cmd_config.c src/cmd_session.c
-    src/cmd_help.c)
+    src/cmd_help.c src/crypto.c src/uap.c src/safety.c src/mnd.c src/pin.c src/cfgfile.c src/cmd_ecc.c src/cmd_mnd.c src/cmd_counter.c)
 
 if(TROPICCTL_CHIP STREQUAL "fake")
-    add_executable(tropicctl ${SRC} src/chip_fake.c)
+    add_executable(tropicctl ${SRC} src/chip_fake.c src/ecc_host.c)
+    target_link_libraries(tropicctl PRIVATE OpenSSL::Crypto)
 else()
     if(NOT LIBTROPIC_SRC OR NOT EXISTS "${LIBTROPIC_SRC}/CMakeLists.txt")
         message(FATAL_ERROR "Set -DLIBTROPIC_SRC to a libtropic source tree, or use -DTROPICCTL_CHIP=fake")
@@ -29,7 +32,6 @@ else()
     set(LT_HELPERS ON CACHE BOOL "" FORCE)
     set(LT_LOG_LVL "None" CACHE STRING "" FORCE)
     add_subdirectory(${LIBTROPIC_SRC} libtropic)
-    find_package(OpenSSL REQUIRED)
     add_subdirectory(${LIBTROPIC_SRC}/cal/openssl cal_openssl)
     target_sources(tropic PRIVATE ${LT_CAL_SRCS})
     target_include_directories(tropic PUBLIC ${LT_CAL_INC_DIRS})
@@ -38,7 +40,7 @@ else()
     target_sources(tropic PRIVATE ${LT_HAL_SRCS})
     target_include_directories(tropic PUBLIC ${LT_HAL_INC_DIRS})
     add_executable(tropicctl ${SRC} src/chip_libtropic.c)
-    target_link_libraries(tropicctl PRIVATE tropic)
+    target_link_libraries(tropicctl PRIVATE tropic OpenSSL::Crypto)
 endif()
 
 target_compile_options(tropicctl PRIVATE -Wall -Wextra)

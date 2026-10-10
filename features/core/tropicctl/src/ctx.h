@@ -12,6 +12,8 @@ typedef struct {
 	pairing_key_t key;
 	char key_desc[96];
 	int have_session;
+	const char *pin_file; /* --pin-file */
+	int pin_stdin;        /* --pin-stdin */
 } ctx_t;
 
 /* defaults from the build and from TROPICCTL_SPI_DEV, TROPICCTL_GPIO_DEV, TROPICCTL_CS_PIN, TROPICCTL_SPI_SPEED */

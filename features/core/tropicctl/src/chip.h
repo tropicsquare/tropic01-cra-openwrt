@@ -68,6 +68,7 @@ void chip_close(chip_t *c);
 /* The shared engineering-sample pairing key (slot 0). Public knowledge, published with libtropic. */
 void chip_shared_key(pairing_key_t *out);
 chip_status_t chip_session(chip_t *c, const pairing_key_t *key, char *err);
+chip_status_t chip_session_end(chip_t *c, char *err); /* abort the secure session so another key can open one */
 
 /* No session needed */
 chip_status_t chip_chip_id(chip_t *c, chip_id_t *out, char *err);
@@ -80,5 +81,51 @@ chip_status_t chip_mem_write(chip_t *c, unsigned slot, const uint8_t *buf, size_
 chip_status_t chip_mem_erase(chip_t *c, unsigned slot, char *err);
 chip_status_t chip_pairing_read(chip_t *c, unsigned slot, uint8_t pub[32], char *err);
 chip_status_t chip_config_dump(chip_t *c, chip_config_obj_t objs[CHIP_CONFIG_OBJ_CNT], char *err);
+
+/* ---- phase 2 and later ---- */
+#define CHIP_ECC_SLOTS 32
+#define CHIP_CERTS 4
+#define CHIP_CERT_MAX 700 /* one certificate of the store; the store is 3840 bytes in total */
+#define CHIP_MCOUNTERS 16
+#define CHIP_MND_SLOTS 128
+#define CHIP_MCOUNTER_MAX 0xFFFFFFFEu
+
+typedef enum { CHIP_CURVE_P256 = 1, CHIP_CURVE_ED25519 = 2 } chip_curve_t;
+typedef enum { CHIP_ORIGIN_GENERATED = 1, CHIP_ORIGIN_STORED = 2 } chip_origin_t;
+typedef enum { CHIP_MODE_UNKNOWN = 0, CHIP_MODE_APPLICATION, CHIP_MODE_MAINTENANCE } chip_mode_t;
+
+/* ECC keys. pub is 64 bytes (X||Y) for P-256 and 32 bytes for Ed25519. An empty slot is CHIP_E_EMPTY. */
+chip_status_t chip_ecc_read(chip_t *c, unsigned slot, uint8_t pub[64], size_t *publen, chip_curve_t *curve,
+                            chip_origin_t *origin, char *err);
+chip_status_t chip_ecc_generate(chip_t *c, unsigned slot, chip_curve_t curve, char *err);
+chip_status_t chip_ecc_store(chip_t *c, unsigned slot, chip_curve_t curve, const uint8_t priv[32], char *err);
+chip_status_t chip_ecc_erase(chip_t *c, unsigned slot, char *err);
+chip_status_t chip_ecdsa_sign(chip_t *c, unsigned slot, const uint8_t hash[32], uint8_t sig[64], char *err);
+chip_status_t chip_eddsa_sign(chip_t *c, unsigned slot, const uint8_t *msg, size_t len, uint8_t sig[64], char *err);
+
+/* Pairing keys (the write is one-way: the slot is used up; invalidation is one-way too) */
+chip_status_t chip_pairing_write(chip_t *c, unsigned slot, const uint8_t pub[32], char *err);
+chip_status_t chip_pairing_invalidate(chip_t *c, unsigned slot, char *err);
+
+/*
+ * Rewrite the whole R-config. The safe sequence is enforced HERE and nowhere else may write R-config: erase first, then
+ * write every object (writing without erasing can put the chip into permanent Alarm Mode, libtropic erratum
+ * OI_TR01_ERR_2026010800). *stage tells the caller how far it got: 0 nothing done, 1 erased, 2 written.
+ */
+chip_status_t chip_rconfig_rewrite(chip_t *c, const uint32_t words[CHIP_CONFIG_OBJ_CNT], int *stage, char *err);
+/* Clear one bit (1 to 0, one-way) of an I-config object, by its position in the dump */
+chip_status_t chip_iconfig_clear_bit(chip_t *c, int object, int bit, char *err);
+
+/* One MAC-and-Destroy sequence on a slot: out is sent, in receives the chip's answer (both 32 bytes) */
+chip_status_t chip_mnd(chip_t *c, unsigned slot, const uint8_t out[32], uint8_t in[32], char *err);
+
+/* Monotonic counters. libtropic's functional test: init may be repeated, update decrements by one, and fails at zero. */
+chip_status_t chip_counter_init(chip_t *c, unsigned n, uint32_t value, char *err);
+chip_status_t chip_counter_get(chip_t *c, unsigned n, uint32_t *value, char *err);
+chip_status_t chip_counter_update(chip_t *c, unsigned n, char *err);
+
+chip_status_t chip_mode(chip_t *c, chip_mode_t *mode, char *err);
+/* the chip's certificate store: up to CHIP_CERTS certificates; unused ones have length 0 */
+chip_status_t chip_certs(chip_t *c, uint8_t certs[CHIP_CERTS][CHIP_CERT_MAX], size_t len[CHIP_CERTS], char *err);
 
 #endif

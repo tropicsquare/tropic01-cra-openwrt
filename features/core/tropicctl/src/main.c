@@ -37,31 +37,45 @@ int main(int argc, char **argv)
 		return rc;
 	}
 
-	/* global options come before the area */
-	for (; i < argc && argv[i][0] == '-'; i++) {
-		const char *o = argv[i];
-		long v;
-		if (strcmp(o, "--json") == 0) g_json = 1;
-		else if (strcmp(o, "-q") == 0) g_quiet = 1;
-		else if (strcmp(o, "-v") == 0) g_verbose = 1;
-		else if (strcmp(o, "--dry-run") == 0) x.dry_run = 1;
-		else if (strcmp(o, "--no-lock") == 0) x.no_lock = 1;
-		else if (strcmp(o, "--version") == 0) {
-			print_version();
-			return TC_OK;
-		} else if (strcmp(o, "-h") == 0 || strcmp(o, "--help") == 0) return cmd_help(0, NULL);
-		else if (strcmp(o, "--spi-dev") == 0 || strcmp(o, "--gpio-dev") == 0 || strcmp(o, "--cs-pin") == 0 ||
-		         strcmp(o, "--spi-speed") == 0 || strcmp(o, "--key") == 0 || strcmp(o, "--lock-timeout") == 0) {
-			if (i + 1 >= argc) return out_error(TC_USAGE, "%s needs a value", o);
-			const char *val = argv[++i];
-			if (strcmp(o, "--spi-dev") == 0) snprintf(x.cfg.spi_dev, sizeof x.cfg.spi_dev, "%s", val);
-			else if (strcmp(o, "--gpio-dev") == 0) snprintf(x.cfg.gpio_dev, sizeof x.cfg.gpio_dev, "%s", val);
-			else if (strcmp(o, "--key") == 0) x.key_source = val;
-			else if (!args_number(val, 0, 1000000000L, &v)) return out_error(TC_USAGE, "%s needs a number", o);
-			else if (strcmp(o, "--cs-pin") == 0) x.cfg.cs_pin = (int)v;
-			else if (strcmp(o, "--spi-speed") == 0) x.cfg.speed = (int)v;
-			else x.lock_timeout = (int)v;
-		} else return out_error(TC_USAGE, "unknown global option %s (see: tropicctl help)", o);
+	/* Global options are accepted anywhere on the command line (a PIN file or --json is natural after the command too). They
+	 * are taken out of the argument list first; none of them collides with a command's own options. */
+	{
+		int n = 1;
+		char **av = malloc((size_t)(argc + 1) * sizeof *av);
+		if (!av) return out_error(TC_INTERNAL, "out of memory");
+		av[0] = argv[0];
+		for (i = 1; i < argc; i++) {
+			const char *o = argv[i];
+			long v;
+			if (strcmp(o, "--json") == 0) g_json = 1;
+			else if (strcmp(o, "-q") == 0) g_quiet = 1;
+			else if (strcmp(o, "-v") == 0) g_verbose = 1;
+			else if (strcmp(o, "--dry-run") == 0) x.dry_run = 1;
+			else if (strcmp(o, "--no-lock") == 0) x.no_lock = 1;
+			else if (strcmp(o, "--pin-stdin") == 0) x.pin_stdin = 1;
+			else if (strcmp(o, "--version") == 0) {
+				print_version();
+				return TC_OK;
+			} else if (strcmp(o, "-h") == 0 || strcmp(o, "--help") == 0) return cmd_help(0, NULL);
+			else if (strcmp(o, "--spi-dev") == 0 || strcmp(o, "--gpio-dev") == 0 || strcmp(o, "--cs-pin") == 0 ||
+			         strcmp(o, "--spi-speed") == 0 || strcmp(o, "--key") == 0 || strcmp(o, "--lock-timeout") == 0 ||
+			         strcmp(o, "--pin-file") == 0) {
+				const char *val;
+				if (i + 1 >= argc) return out_error(TC_USAGE, "%s needs a value", o);
+				val = argv[++i];
+				if (strcmp(o, "--spi-dev") == 0) snprintf(x.cfg.spi_dev, sizeof x.cfg.spi_dev, "%s", val);
+				else if (strcmp(o, "--gpio-dev") == 0) snprintf(x.cfg.gpio_dev, sizeof x.cfg.gpio_dev, "%s", val);
+				else if (strcmp(o, "--key") == 0) x.key_source = val;
+				else if (strcmp(o, "--pin-file") == 0) x.pin_file = val;
+				else if (!args_number(val, 0, 1000000000L, &v)) return out_error(TC_USAGE, "%s needs a number", o);
+				else if (strcmp(o, "--cs-pin") == 0) x.cfg.cs_pin = (int)v;
+				else if (strcmp(o, "--spi-speed") == 0) x.cfg.speed = (int)v;
+				else x.lock_timeout = (int)v;
+			} else av[n++] = argv[i];
+		}
+		argc = n;
+		argv = av;
+		i = 1;
 	}
 	if (i >= argc) return cmd_help(0, NULL);
 	if (strcmp(argv[i], "help") == 0) return cmd_help(argc - i - 1, argv + i + 1);

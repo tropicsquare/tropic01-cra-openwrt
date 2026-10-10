@@ -33,6 +33,7 @@ static chip_status_t map(lt_ret_t r, char *err)
 	case LT_L3_R_MEM_DATA_READ_SLOT_EMPTY: return CHIP_E_EMPTY;
 	case LT_L3_SLOT_INVALID: return CHIP_E_INVALID;
 	case LT_L3_SLOT_NOT_EMPTY: return CHIP_E_OCCUPIED;
+	case LT_L3_COUNTER_INVALID: return CHIP_E_EMPTY;
 	case LT_PARAM_ERR: return CHIP_E_PARAM;
 	default: return CHIP_E_OTHER;
 	}
@@ -82,6 +83,8 @@ chip_status_t chip_session(chip_t *c, const pairing_key_t *key, char *err)
 {
 	return map(lt_verify_chip_and_start_secure_session(&c->h, key->priv, key->pub, (lt_pkey_index_t)key->slot), err);
 }
+
+chip_status_t chip_session_end(chip_t *c, char *err) { return map(lt_session_abort(&c->h), err); }
 
 static char g_cap[4096];
 static size_t g_caplen;
@@ -166,5 +169,128 @@ chip_status_t chip_config_dump(chip_t *c, chip_config_obj_t objs[CHIP_CONFIG_OBJ
 		objs[k].r_value = r.obj[k];
 		objs[k].i_value = i.obj[k];
 	}
+	return CHIP_OK;
+}
+
+/* ------------------------------------------------------------------------------------------------ phase 2 and later */
+
+static lt_ecc_curve_type_t lt_curve(chip_curve_t c) { return c == CHIP_CURVE_ED25519 ? TR01_CURVE_ED25519 : TR01_CURVE_P256; }
+
+chip_status_t chip_ecc_read(chip_t *c, unsigned slot, uint8_t pub[64], size_t *publen, chip_curve_t *curve,
+                            chip_origin_t *origin, char *err)
+{
+	lt_ecc_curve_type_t cv = TR01_CURVE_P256;
+	lt_ecc_key_origin_t og = TR01_KEY_GENERATED;
+	lt_ret_t r = lt_ecc_key_read(&c->h, (lt_ecc_slot_t)slot, pub, 64, &cv, &og);
+	if (r == LT_L3_INVALID_KEY) {
+		snprintf(err, CHIP_ERRLEN, "%s", lt_ret_verbose(r));
+		return CHIP_E_EMPTY; /* an empty ECC slot answers with an invalid-key status */
+	}
+	if (r != LT_OK) return map(r, err);
+	*curve = cv == TR01_CURVE_ED25519 ? CHIP_CURVE_ED25519 : CHIP_CURVE_P256;
+	*origin = og == TR01_KEY_STORED ? CHIP_ORIGIN_STORED : CHIP_ORIGIN_GENERATED;
+	*publen = cv == TR01_CURVE_ED25519 ? 32 : 64;
+	return CHIP_OK;
+}
+
+chip_status_t chip_ecc_generate(chip_t *c, unsigned slot, chip_curve_t curve, char *err)
+{
+	return map(lt_ecc_key_generate(&c->h, (lt_ecc_slot_t)slot, lt_curve(curve)), err);
+}
+
+chip_status_t chip_ecc_store(chip_t *c, unsigned slot, chip_curve_t curve, const uint8_t priv[32], char *err)
+{
+	return map(lt_ecc_key_store(&c->h, (lt_ecc_slot_t)slot, lt_curve(curve), priv), err);
+}
+
+chip_status_t chip_ecc_erase(chip_t *c, unsigned slot, char *err) { return map(lt_ecc_key_erase(&c->h, (lt_ecc_slot_t)slot), err); }
+
+chip_status_t chip_ecdsa_sign(chip_t *c, unsigned slot, const uint8_t hash[32], uint8_t sig[64], char *err)
+{
+	return map(lt_ecc_ecdsa_sign(&c->h, (lt_ecc_slot_t)slot, hash, 32, sig), err);
+}
+
+chip_status_t chip_eddsa_sign(chip_t *c, unsigned slot, const uint8_t *msg, size_t len, uint8_t sig[64], char *err)
+{
+	return map(lt_ecc_eddsa_sign(&c->h, (lt_ecc_slot_t)slot, msg, (uint16_t)len, sig), err);
+}
+
+chip_status_t chip_pairing_write(chip_t *c, unsigned slot, const uint8_t pub[32], char *err)
+{
+	return map(lt_pairing_key_write(&c->h, pub, (lt_pkey_index_t)slot), err);
+}
+
+chip_status_t chip_pairing_invalidate(chip_t *c, unsigned slot, char *err)
+{
+	return map(lt_pairing_key_invalidate(&c->h, (lt_pkey_index_t)slot), err);
+}
+
+chip_status_t chip_rconfig_rewrite(chip_t *c, const uint32_t words[CHIP_CONFIG_OBJ_CNT], int *stage, char *err)
+{
+	struct lt_config_t cfg;
+	chip_status_t st;
+	*stage = 0;
+	for (int i = 0; i < CHIP_CONFIG_OBJ_CNT; i++) cfg.obj[i] = words[i];
+	/* erase first, always: writing the R-config without erasing it can put the chip into permanent Alarm Mode
+	 * (libtropic erratum OI_TR01_ERR_2026010800). This is the only place that writes the R-config. */
+	st = map(lt_r_config_erase(&c->h), err);
+	if (st != CHIP_OK) return st;
+	*stage = 1;
+	st = map(lt_write_whole_R_config(&c->h, &cfg), err);
+	if (st != CHIP_OK) return st;
+	*stage = 2;
+	return CHIP_OK;
+}
+
+chip_status_t chip_iconfig_clear_bit(chip_t *c, int object, int bit, char *err)
+{
+	if (object < 0 || object >= CHIP_CONFIG_OBJ_CNT || bit < 0 || bit > 31) {
+		snprintf(err, CHIP_ERRLEN, "LT_PARAM_ERR");
+		return CHIP_E_PARAM;
+	}
+	return map(lt_i_config_write(&c->h, cfg_desc_table[object].addr, (uint8_t)bit), err);
+}
+
+chip_status_t chip_mnd(chip_t *c, unsigned slot, const uint8_t out[32], uint8_t in[32], char *err)
+{
+	return map(lt_mac_and_destroy(&c->h, (lt_mac_and_destroy_slot_t)slot, out, in), err);
+}
+
+chip_status_t chip_counter_init(chip_t *c, unsigned n, uint32_t value, char *err)
+{
+	return map(lt_mcounter_init(&c->h, (enum lt_mcounter_index_t)n, value), err);
+}
+
+chip_status_t chip_counter_get(chip_t *c, unsigned n, uint32_t *value, char *err)
+{
+	return map(lt_mcounter_get(&c->h, (enum lt_mcounter_index_t)n, value), err);
+}
+
+chip_status_t chip_counter_update(chip_t *c, unsigned n, char *err)
+{
+	return map(lt_mcounter_update(&c->h, (enum lt_mcounter_index_t)n), err);
+}
+
+chip_status_t chip_mode(chip_t *c, chip_mode_t *mode, char *err)
+{
+	lt_tr01_mode_t m = LT_TR01_APPLICATION;
+	chip_status_t st = map(lt_get_tr01_mode(&c->h, &m), err);
+	if (st != CHIP_OK) return st;
+	*mode = m == LT_TR01_APPLICATION ? CHIP_MODE_APPLICATION : m == LT_TR01_MAINTENANCE ? CHIP_MODE_MAINTENANCE : CHIP_MODE_UNKNOWN;
+	return CHIP_OK;
+}
+
+chip_status_t chip_certs(chip_t *c, uint8_t certs[CHIP_CERTS][CHIP_CERT_MAX], size_t len[CHIP_CERTS], char *err)
+{
+	struct lt_cert_store_t store;
+	chip_status_t st;
+	for (int i = 0; i < CHIP_CERTS; i++) {
+		store.certs[i] = certs[i];
+		store.buf_len[i] = CHIP_CERT_MAX;
+		store.cert_len[i] = 0;
+	}
+	st = map(lt_get_info_cert_store(&c->h, &store), err);
+	if (st != CHIP_OK) return st;
+	for (int i = 0; i < CHIP_CERTS; i++) len[i] = store.cert_len[i];
 	return CHIP_OK;
 }
