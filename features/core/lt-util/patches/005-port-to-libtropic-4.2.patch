@@ -1,0 +1,476 @@
+Port lt-util to libtropic 4.2.0 (OpenSSL CAL, Linux SPI HAL).
+
+libtropic-util at cbc30f5 bundles libtropic v1.0.0 and the old hal/port/unix
+layer. Build against an external libtropic 4.2.0 source tree instead
+(-DLIBTROPIC_SRC), so the feed carries one libtropic.
+
+API changes absorbed: TR01_ prefixes (curves, pairing slot index, random
+length), lt_ecc_key_origin_t, LT_L3_SLOT_EMPTY, buffer-size arguments of
+lt_ecc_key_read() and lt_r_mem_data_read(), session_status in the L3 state,
+lt_dev_linux_spi_t, the logging macro. lt_hmac_sha256() now returns a status:
+the MAC-and-Destroy code checks it and takes its cleanup path on failure.
+
+The libtropic handle is zero-initialised and given a crypto context (lt_ctx_openssl_t):
+in 4.x the application owns that context, and a NULL one crashed every chip command.
+
+--- a/CMakeLists.txt	2025-09-12 15:06:04.000000000 +0200
++++ b/CMakeLists.txt	2026-10-09 18:25:16.527455694 +0200
+@@ -1,110 +1,29 @@
+ cmake_minimum_required(VERSION 3.21.0)
+ 
+-
+-###########################################################################
+-#                                                                         #
+-#   Paths and setup                                                       #
+-#                                                                         #
+-###########################################################################
+-
+-#set(CMAKE_BUILD_TYPE Debug)
+-
+-set(PATH_LIBTROPIC "libtropic/")
+-
+-option(LINUX_SPI           "Compile for generic SPI and GPIO Linux UAPI" OFF)
+-option(USB_DONGLE_TS1301  "Compile for TS1301 USB dongle" OFF)
+-option(USB_DONGLE_TS1302  "Compile for TS1302 USB dongle" OFF)
+-
+-# If none of the options are set, enable USB_DONGLE_TS1302 by default
+-if(NOT USB_DONGLE_TS1301 AND NOT USB_DONGLE_TS1302 AND NOT LINUX_SPI)
+-    set(USB_DONGLE_TS1302 ON CACHE BOOL "Compile for TS1302 USB dongle" FORCE)
+-endif()
+-
+-###########################################################################
+-#                                                                         #
+-#   Define project's name                                                 #
+-#                                                                         #
+-###########################################################################
+-
+-project(libtropic_linux_spi_example
+-        VERSION 0.1.0
+-        DESCRIPTION "Example of libtropic's usage in Unix environment"
+-        LANGUAGES C)
+-
+-
+-###########################################################################
+-#                                                                         #
+-#   Sources defined by this project                                       #
+-#                                                                         #
+-###########################################################################
+-
+-if(USB_DONGLE_TS1301 OR USB_DONGLE_TS1302)
+-    add_executable(lt-util src/main.c  src/macandd.c
+-        ${CMAKE_CURRENT_SOURCE_DIR}/${PATH_LIBTROPIC}hal/port/unix/lt_port_unix_usb_dongle.c)
+-        include_directories(
+-            ${PATH_LIBTROPIC}/include
+-            ${PATH_LIBTROPIC}/hal/port/unix
+-        )
+-endif()
+-
+-if(LINUX_SPI)
+-    add_executable(lt-util src/main.c  src/macandd.c
+-        ${CMAKE_CURRENT_SOURCE_DIR}/${PATH_LIBTROPIC}hal/port/unix/lt_port_unix_spi.c)
+-        include_directories(
+-            ${PATH_LIBTROPIC}/include
+-            ${PATH_LIBTROPIC}/hal/port/unix
+-        )
+-endif()
+-
+-###########################################################################
+-#                                                                         #
+-#   Add libtropic and set it up                                           #
+-#                                                                         #
+-###########################################################################
+-
+-# Use trezor crypto as a source of backend cryptography code
+-set(LT_USE_TREZOR_CRYPTO ON)
+-
+-# Add path to libtropic's repository root folder
+-add_subdirectory(${PATH_LIBTROPIC} "libtropic")
+-
+-# We need this folder because we need to include lt_hmac_sha256.h file, used in macandd.c
+-include_directories(${PATH_LIBTROPIC}/src)
+-
+-# Customize libtropic's compilation
+-target_compile_options(tropic PRIVATE -Wall)
+-target_compile_options(tropic PRIVATE -ffunction-sections -fdata-sections)
+-target_compile_options(tropic PRIVATE -Wno-implicit-function-declaration)
+-
+-if(USB_DONGLE_TS1301)
+-    target_compile_definitions(lt-util PRIVATE USB_DONGLE_TS1301)
+-endif()
+-if(USB_DONGLE_TS1302)
+-    target_compile_definitions(lt-util PRIVATE USB_DONGLE_TS1302)
+-endif()
+-if(LINUX_SPI)
+-    target_compile_definitions(lt-util PRIVATE LINUX_SPI)
+-endif()
+-
+-# To see debug messages in the console, pass -DCMAKE_BUILD_TYPE=Debug when invoking cmake
+-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+-    message("Debug logging active!")
+-    target_compile_definitions(lt-util PRIVATE LIBT_DEBUG)
+-endif()
+-
+-###########################################################################
+-#                                                                         #
+-#   Link executable                                                       #
+-#                                                                         #
+-###########################################################################
+-if(APPLE)
+-    target_link_options(lt-util PRIVATE -Wl,-dead_strip)
+-    target_compile_options(lt-util PRIVATE -Wno-parentheses-equality -Wno-pointer-sign)
+-elseif(UNIX)
+-    target_link_options(lt-util PRIVATE -Wl,--gc-sections)
+-    target_compile_options(lt-util PRIVATE -ffunction-sections -fdata-sections)
+-endif()
+-
+-if(USB_DONGLE_TS1301 OR USB_DONGLE_TS1302 OR LINUX_SPI)
+-    target_link_libraries(lt-util PRIVATE tropic)
+-endif()
++# lt-util for TROPIC01 on a Linux SPI/GPIO board (OpenWrt One).
++# libtropic is not bundled: pass its source tree (the OpenWrt package installs
++# it under usr/src/libtropic) with -DLIBTROPIC_SRC=<path>.
++set(LIBTROPIC_SRC "" CACHE PATH "Path to the libtropic source tree")
++if(NOT LIBTROPIC_SRC OR NOT EXISTS "${LIBTROPIC_SRC}/CMakeLists.txt")
++    message(FATAL_ERROR "Set -DLIBTROPIC_SRC to a libtropic source tree")
++endif()
++
++project(lt_util VERSION 0.1.0 DESCRIPTION "TROPIC01 command line utility" LANGUAGES C)
++
++add_subdirectory(${LIBTROPIC_SRC} libtropic)
++
++# OpenSSL crypto abstraction layer and the Linux SPI/GPIO hardware layer
++find_package(OpenSSL REQUIRED)
++add_subdirectory(${LIBTROPIC_SRC}/cal/openssl cal_openssl)
++target_sources(tropic PRIVATE ${LT_CAL_SRCS})
++target_include_directories(tropic PUBLIC ${LT_CAL_INC_DIRS})
++target_link_libraries(tropic PUBLIC OpenSSL::Crypto)
++add_subdirectory(${LIBTROPIC_SRC}/hal/linux/spi linux_spi_hal)
++target_sources(tropic PRIVATE ${LT_HAL_SRCS})
++target_include_directories(tropic PUBLIC ${LT_HAL_INC_DIRS})
++
++add_executable(lt-util src/main.c src/macandd.c)
++# macandd.c uses libtropic's HMAC helper, which is not a public header
++target_include_directories(lt-util PRIVATE ${LIBTROPIC_SRC}/src)
++target_compile_definitions(lt-util PRIVATE LINUX_SPI=1)
++target_link_libraries(lt-util PRIVATE tropic)
+--- a/src/macandd.c	2025-09-12 15:06:04.000000000 +0200
++++ b/src/macandd.c	2026-10-09 18:25:16.530455735 +0200
+@@ -1,6 +1,5 @@
+ #include "inttypes.h"
+ #include "libtropic.h"
+-#include "libtropic_examples.h"
+ #include "libtropic_logging.h"
+ #include "string.h"
+ 
+@@ -41,7 +40,7 @@
+         || (add_size > MAC_AND_DESTROY_ADD_SIZE_MAX) || !secret) {
+         return LT_PARAM_ERR;
+     }
+-    if (h->l3.session != SESSION_ON) {
++    if (h->l3.session_status != LT_SECURE_SESSION_ON) {
+         return LT_HOST_NO_SESSION;
+     }
+ 
+@@ -84,15 +83,21 @@
+     nvm.i = MACANDD_ROUNDS;
+     // Compute tag t = KDF(s, "0"), save into nvm struct
+     // Tag will be later used during lt_PIN_check() to verify validity of secret
+-    lt_hmac_sha256(s, 32, (uint8_t *)"0", 1, nvm.t);
+-
++    ret = lt_hmac_sha256(s, 32, (uint8_t *)"0", 1, nvm.t);
++    if (ret != LT_OK) {
++        goto exit;
++    }
+     // Compute u = KDF(s, "1")
+     // This value will be sent through M&D sequence to initialize a slot
+-    lt_hmac_sha256(s, 32, (uint8_t *)"1", 1, u);
+-
++    ret = lt_hmac_sha256(s, 32, (uint8_t *)"1", 1, u);
++    if (ret != LT_OK) {
++        goto exit;
++    }
+     // Compute v = KDF(0, PIN||A) where 0 is all zeroes key
+-    lt_hmac_sha256((uint8_t*)"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", 32, kdf_input_buff, PIN_size+add_size, v);
+-
++    ret = lt_hmac_sha256((uint8_t*)"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", 32, kdf_input_buff, PIN_size+add_size, v);
++    if (ret != LT_OK) {
++        goto exit;
++    }
+     for (int i = 0; i < nvm.i; i++) {
+         uint8_t garbage[32] = {0};
+ 
+@@ -115,8 +120,10 @@
+ 
+         // Derive k_i = KDF(w, PIN||A)
+         // This key will be used to encrypt secret s
+-        lt_hmac_sha256(w, 32, kdf_input_buff, PIN_size + add_size, k_i);
+-
++        ret = lt_hmac_sha256(w, 32, kdf_input_buff, PIN_size + add_size, k_i);
++        if (ret != LT_OK) {
++            goto exit;
++        }
+         // Encrypt s using k_i as a key
+         // TODO implement some better encryption, or discuss if using XOR here is fine
+         for (int j = 0; j < 32; j++) {
+@@ -131,8 +138,10 @@
+     }
+     lt_port_delay(&h->l2, MACANDD_DELAY);
+     // Final secret is released to the caller
+-    lt_hmac_sha256(s, 32, (uint8_t *)"2", 1, secret);
+-
++    ret = lt_hmac_sha256(s, 32, (uint8_t *)"2", 1, secret);
++    if (ret != LT_OK) {
++        goto exit;
++    }
+ // Cleanup all sensitive data from memory
+ exit:
+ 
+@@ -172,7 +181,7 @@
+         || (add_size > MAC_AND_DESTROY_ADD_SIZE_MAX) || !secret) {
+         return LT_PARAM_ERR;
+     }
+-    if (h->l3.session != SESSION_ON) {
++    if (h->l3.session_status != LT_SECURE_SESSION_ON) {
+         return LT_HOST_NO_SESSION;
+     }
+ 
+@@ -204,7 +213,7 @@
+ 
+     // Load M&D data from TROPIC01's R memory
+     uint16_t res_size;
+-    lt_ret_t ret = lt_r_mem_data_read(h, R_MEM_DATA_SLOT_MACANDD, (uint8_t *)&nvm, &res_size);
++    lt_ret_t ret = lt_r_mem_data_read(h, R_MEM_DATA_SLOT_MACANDD, (uint8_t *)&nvm, sizeof(nvm), &res_size);
+     if (ret != LT_OK) {
+         goto exit;
+     }
+@@ -230,8 +239,10 @@
+     }
+     lt_port_delay(&h->l2, MACANDD_DELAY);
+     // Compute v’ = KDF(0, PIN’||A).
+-    lt_hmac_sha256((uint8_t*)"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", 32, kdf_input_buff, PIN_size + add_size, v_);
+-
++    ret = lt_hmac_sha256((uint8_t*)"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", 32, kdf_input_buff, PIN_size + add_size, v_);
++    if (ret != LT_OK) {
++        goto exit;
++    }
+     // Execute w’ = MACANDD(i, v’)
+     ret = lt_mac_and_destroy(h, nvm.i, v_, w_);
+     if (ret != LT_OK) {
+@@ -239,8 +250,10 @@
+     }
+ 
+     // Compute k’_i = KDF(w’, PIN’||A)
+-    lt_hmac_sha256(w_, 32, kdf_input_buff, PIN_size + add_size, k_i);
+-
++    ret = lt_hmac_sha256(w_, 32, kdf_input_buff, PIN_size + add_size, k_i);
++    if (ret != LT_OK) {
++        goto exit;
++    }
+     // Read the ciphertext c_i and tag t from NVM, decrypt c_i with k’_i as the key and obtain s_
+     // TODO figure out if XOR can be used here?
+     for (int j = 0; j < 32; j++) {
+@@ -248,8 +261,10 @@
+     }
+ 
+     // Compute tag t = KDF(s, "0x00")
+-    lt_hmac_sha256(s_, 32, (uint8_t *)"0", 1, t_);
+-
++    ret = lt_hmac_sha256(s_, 32, (uint8_t *)"0", 1, t_);
++    if (ret != LT_OK) {
++        goto exit;
++    }
+     // If t’ != t: FAIL
+     if (memcmp(nvm.t, t_, 32) != 0) {
+         ret = LT_FAIL;
+@@ -258,8 +273,10 @@
+ 
+     // Pin is correct, now initialize macandd slots again:
+     // Compute u = KDF(s’, "0x01")
+-    lt_hmac_sha256(s_, 32, (uint8_t *)"1", 1, u);
+-
++    ret = lt_hmac_sha256(s_, 32, (uint8_t *)"1", 1, u);
++    if (ret != LT_OK) {
++        goto exit;
++    }
+     for (int x = nvm.i; x < MACANDD_ROUNDS - 1; x++) {
+         uint8_t garbage[32] = {0};
+ 
+@@ -284,8 +301,10 @@
+     }
+     lt_port_delay(&h->l2, MACANDD_DELAY);
+     // Calculate secret and store it into passed array
+-    lt_hmac_sha256(s_, 32, (uint8_t *)"2", 1, secret);
+-
++    ret = lt_hmac_sha256(s_, 32, (uint8_t *)"2", 1, secret);
++    if (ret != LT_OK) {
++        goto exit;
++    }
+ // Cleanup all sensitive data from memory
+ exit:
+ 
+--- a/src/main.c	2026-10-09 18:25:16.515455529 +0200
++++ b/src/main.c	2026-10-09 19:29:51.971415387 +0200
+@@ -21,13 +21,14 @@
+ #include "lt_port_unix_usb_dongle.h"
+ #endif
+ #if LINUX_SPI
+-#include "lt_port_unix_spi.h"
++#include "libtropic_port_linux_spi.h"
++#include "libtropic_openssl.h"
+ #endif
+ #include "libtropic_common.h"
+ #include "libtropic_logging.h"
+ #include "macandd.h"
+ 
+-#define LT_LOG_CMD(f_, ...) LT_LOG("[CMD] " f_, ##__VA_ARGS__)
++#define LT_LOG_CMD(f_, ...) LT_LOG_INFO("[CMD] " f_, ##__VA_ARGS__)
+ 
+ #define HEX_DATA_SIZE 32
+ 
+@@ -46,7 +47,7 @@
+  *     If you have Mikroe click shield or arduino shield, you might need to check as well which keys work.
+  *
+  */
+-int8_t pkey_index_0 =  PAIRING_KEY_SLOT_INDEX_0;
++int8_t pkey_index_0 =  TR01_PAIRING_KEY_SLOT_INDEX_0;
+ #if USB_DONGLE_TS1301
+ #pragma message("Compiling for USB_DONGLE_TS1301")
+ #define ENGINEERING_SAMPLES_01
+@@ -240,7 +241,7 @@
+     // Parsing count number
+     char *endptr;
+     long int count = strtol(count_in, &endptr, 10);
+-    if((count > RANDOM_VALUE_GET_LEN_MAX) | (count <= 1)) {
++    if((count > TR01_RANDOM_VALUE_GET_LEN_MAX) | (count <= 1)) {
+         LT_LOG_ERROR("Invalid length passed, use number between 1-255");
+         return 1;
+     }
+@@ -255,7 +256,7 @@
+     LT_LOG_INFO("File \"%s\" opened for writing", file);
+ 
+     // Get random bytes from TROPIC01 into bytes[] buffer
+-    uint8_t bytes[RANDOM_VALUE_GET_LEN_MAX] = {0};
++    uint8_t bytes[TR01_RANDOM_VALUE_GET_LEN_MAX] = {0};
+     lt_ret_t ret;
+     ret = lt_init(h);
+     if(ret != LT_OK) {
+@@ -351,7 +352,7 @@
+     } else {
+         LT_LOG_INFO("Secure channel established: %s", lt_ret_verbose(ret));
+     }
+-    ret = lt_ecc_key_store(h, slot, CURVE_ED25519, keypair); // Only first 32B will be taken
++    ret = lt_ecc_key_store(h, slot, TR01_CURVE_ED25519, keypair); // Only first 32B will be taken
+     if(ret != LT_OK) {
+         LT_LOG_ERROR("Error l3 cmd: %s", lt_ret_verbose(ret));
+         lt_deinit(h);
+@@ -362,7 +363,7 @@
+ 
+     lt_deinit(h);
+ 
+-    LT_LOG("OK");
++    LT_LOG_INFO("OK");
+     return 0;
+ }
+ 
+@@ -403,8 +404,8 @@
+         LT_LOG_INFO("Secure channel established: %s", lt_ret_verbose(ret));
+     }
+     lt_ecc_curve_type_t curve = 2;
+-    ecc_key_origin_t origin = 2;
+-    ret = lt_ecc_key_generate(h, (uint8_t)slot, CURVE_P256);
++    lt_ecc_key_origin_t origin = 2;
++    ret = lt_ecc_key_generate(h, (uint8_t)slot, TR01_CURVE_P256);
+     if(ret != LT_OK) {
+         LT_LOG_ERROR("Error l3 cmd: %s", lt_ret_verbose(ret));
+         lt_deinit(h);
+@@ -466,8 +467,8 @@
+         LT_LOG_INFO("Secure channel established: %s", lt_ret_verbose(ret));
+     }
+     lt_ecc_curve_type_t curve = 2;
+-    ecc_key_origin_t origin = 2;
+-    ret = lt_ecc_key_read(h, (uint8_t)slot, pubkey, &curve, &origin);
++    lt_ecc_key_origin_t origin = 2;
++    ret = lt_ecc_key_read(h, (uint8_t)slot, pubkey, sizeof(pubkey), &curve, &origin);
+     if(ret != LT_OK) {
+         LT_LOG_ERROR("Error l3 cmd: %s", lt_ret_verbose(ret));
+         lt_deinit(h);
+@@ -477,10 +478,10 @@
+     }
+ 
+     /* P256 pubkey = 64 bytes (X+Y), Ed25519 = 32 bytes */
+-    size_t pubkey_len = (curve == CURVE_P256) ? 64 : 32;
++    size_t pubkey_len = (curve == TR01_CURVE_P256) ? 64 : 32;
+     size_t written = fwrite(pubkey, sizeof(uint8_t), pubkey_len, fp);
+     LT_LOG_INFO("Curve: %s, Number of elements written: %zu",
+-                (curve == CURVE_P256) ? "P256" : "Ed25519", written);
++                (curve == TR01_CURVE_P256) ? "P256" : "Ed25519", written);
+ 
+     fclose(fp);
+ 
+@@ -526,7 +527,7 @@
+         LT_LOG_INFO("Secure channel established: %s", lt_ret_verbose(ret));
+     }
+     lt_ecc_curve_type_t curve = 2;
+-    ecc_key_origin_t origin = 2;
++    lt_ecc_key_origin_t origin = 2;
+     ret = lt_ecc_key_erase(h, (uint8_t)slot);
+     if(ret != LT_OK) {
+         LT_LOG_ERROR("Error l3 cmd: %s", lt_ret_verbose(ret));
+@@ -761,7 +762,7 @@
+ 
+     uint8_t existing[32] = {0};
+     ret = lt_pairing_key_read(h, existing, (uint8_t)slot);
+-    if (ret != LT_L3_PAIRING_KEY_EMPTY) {
++    if (ret != LT_L3_SLOT_EMPTY) {
+         LT_LOG_ERROR("Refusing: slot %ld is not empty (read returned %s)", slot, lt_ret_verbose(ret));
+         lt_deinit(h);
+         return 1;
+@@ -888,9 +889,9 @@
+         LT_LOG_INFO("Secure channel established: %s", lt_ret_verbose(ret));
+     }
+     lt_ecc_curve_type_t curve = 2;
+-    ecc_key_origin_t origin = 2;
++    lt_ecc_key_origin_t origin = 2;
+     uint16_t data_size;
+-    ret = lt_r_mem_data_read(h, (uint16_t)slot, mem_content, &data_size);
++    ret = lt_r_mem_data_read(h, (uint16_t)slot, mem_content, sizeof(mem_content), &data_size);
+     if(ret != LT_OK) {
+         LT_LOG_ERROR("Error l3 cmd: %s", lt_ret_verbose(ret));
+         lt_deinit(h);
+@@ -955,7 +956,7 @@
+         LT_LOG_INFO("Secure channel established: %s", lt_ret_verbose(ret));
+     }
+     lt_ecc_curve_type_t curve = 2;
+-    ecc_key_origin_t origin = 2;
++    lt_ecc_key_origin_t origin = 2;
+     ret = lt_r_mem_data_erase(h, (uint16_t)slot);
+     if(ret != LT_OK) {
+         LT_LOG_ERROR("Error l3 cmd: %s", lt_ret_verbose(ret));
+@@ -1222,7 +1223,7 @@
+         return 1;
+     }
+ 
+-    lt_handle_t h;
++    lt_handle_t h = {0};
+     lt_dev_unix_usb_dongle_t uart = {0};
+     h.l2.device = &uart;
+     uart.baud_rate = 115200;
+@@ -1297,13 +1298,16 @@
+     }
+ 
+     // This will setup mappings compatible with RPi and our RPi shield.
+-    lt_dev_unix_spi_t device = {0};
++    lt_dev_linux_spi_t device = {0};
+     strcpy(device.gpio_dev, "/dev/gpiochip0");
+     strcpy(device.spi_dev, "/dev/spidev2.0");
+     device.spi_speed = 1000000; // 1 MHz
+     device.gpio_cs_num = 25;    // GPIO 25 as on RPi shield.
+ 
+-    lt_handle_t h;
++    // libtropic 4.x: the application owns the crypto context and hands it to the handle
++    lt_ctx_openssl_t crypto_ctx = {0};
++    lt_handle_t h = {0};
++    h.l3.crypto_ctx = &crypto_ctx;
+     h.l2.device = &device;
+ 
+     if (argc == 2) {

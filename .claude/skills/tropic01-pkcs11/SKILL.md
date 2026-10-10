@@ -69,9 +69,9 @@ Located in [`features/core/libtropic-pkcs11/patches/`](../../../features/core/li
 | 2 | `002-use-spi-device-structure.patch` | Injects SPI device/GPIO paths at CMake build time |
 | 3 | `003-use-engineering-sample-keys.patch` | Pairing keys for `ENGINEERING_SAMPLES_01` silicon |
 | 4 | `004-add-cko-certificate-from-r-mem.patch` | Exposes R-MEM cert as a `CKO_CERTIFICATE` object |
-| 5 | `005-add-ecdsa-sign-prehash.patch` | Adds `lt_ecc_ecdsa_sign_prehash()` — **critical**: avoids double-hashing pre-hashed digests from OpenVPN/`CKM_ECDSA` |
 | 6 | `006-add-syslog-tracing.patch` | Adds syslog output for debugging (debug aid; see backlog 3.10) |
 | 7 | `007-load-per-unit-pairing-key.patch` | Loads a per-unit pairing key instead of the shared engineering-sample key, when one is provisioned |
+| 8 | `008-port-to-libtropic-4.2.patch` | Builds against the feed's libtropic 4.2.0 tree; signs a 32-byte hash with `lt_ecc_ecdsa_sign()` (no second hash) |
 
 `lt-util` carries its own patches in [`features/core/lt-util/patches/`](../../../features/core/lt-util/patches/) (SPI device, engineering-sample keys, P-256 and full public-key export, per-unit pairing key). `lt-util -e -s` signs with EdDSA only and fails on a P-256 slot: sign through PKCS#11 / OpenSSL instead.
 
@@ -341,9 +341,9 @@ C_GenerateRandom(session, randomData, sizeof(randomData));
 - **`opensc` fails to build** (`__orig_strlcpy is not a function`): Conflicts with
   OpenWrt fortify headers. Not worth fixing — use `pkcs11-test` for verification instead.
 
-- **OpenVPN TLS handshake fails / signature invalid**: Likely missing patch
-  `005-add-ecdsa-sign-prehash.patch` — OpenVPN passes a pre-hashed digest via
-  `CKM_ECDSA`, and without this patch the module double-hashes it.
+- **OpenVPN TLS handshake fails / signature invalid**: Check that the module
+  signs the 32-byte digest OpenVPN passes via `CKM_ECDSA` directly (patch
+  `008-port-to-libtropic-4.2.patch`); a second hash makes every signature invalid.
 
 - **`LT_L2_SPI_ERROR` from `lt-util`**: Check physical SPI/GPIO wiring.
   Verify `/dev/spidev2.0` and `/dev/gpiochip0` exist on the target.

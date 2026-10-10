@@ -5,6 +5,9 @@ PKG_VERSION:=0.1.0
 PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
+# Only the project itself: it no longer uses its bundled libtropic submodule (the feed
+# builds one libtropic), and a submodule-inclusive tarball is not reproducible.
+PKG_SOURCE_SUBMODULES:=skip
 PKG_SOURCE_URL:=https://github.com/tropicsquare/libtropic-util.git
 # Pinned to the commit this package was actually built and tested
 # against, not HEAD (which moves). Verified byte-identical (except
@@ -13,7 +16,7 @@ PKG_SOURCE_URL:=https://github.com/tropicsquare/libtropic-util.git
 PKG_SOURCE_VERSION:=cbc30f5ac37e7d0874df6b989d4b4be7d01d93e8
 PKG_SOURCE_DATE:=2025-09-12
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_SOURCE_DATE)-$(PKG_SOURCE_VERSION).tar.zst
-PKG_MIRROR_HASH:=de29f4380f9fe0b17dd1cc17bd17d787b08ce30f93e11a6a3244156f2148cd7b
+PKG_MIRROR_HASH:=8cadc90bd9b77106cd8993296fae85f907f288e204b862383e8163e244c37128
 PKG_SOURCE_SUBDIR:=$(PKG_NAME)-$(PKG_VERSION)
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)
 
@@ -29,7 +32,7 @@ define Package/lt-util
   CATEGORY:=Utilities
   TITLE:=Command line utility for TROPIC01 secure element
   URL:=https://github.com/tropicsquare/libtropic-util
-  DEPENDS:=+libtropic
+  DEPENDS:=+libtropic +libopenssl
 endef
 
 define Package/lt-util/description
@@ -41,14 +44,11 @@ define Package/lt-util/description
 endef
 
 CMAKE_OPTIONS += \
-	-DLINUX_SPI=ON \
-	-DCMAKE_BUILD_TYPE=Debug \
-	-DLT_PRINT_SPI_DATA=1 \
-	-DLT_BUILD_EXAMPLES=OFF \
-	-DLT_BUILD_TESTS=OFF \
+	-DLIBTROPIC_SRC=$(STAGING_DIR)/usr/src/libtropic \
+	-DCMAKE_BUILD_TYPE=Release \
+	-DLT_PRINT_SPI_DATA=OFF \
 	-DLT_HELPERS=ON \
-	-DLT_LOG_LVL=None \
-	-DLT_USE_TREZOR_CRYPTO=ON
+	-DLT_LOG_LVL=Error
 
 # CMakeLists.txt doesn't have install target, binary is built in-tree
 define Build/Install

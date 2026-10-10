@@ -1,6 +1,6 @@
 config PACKAGE_libtropic
 	bool "libtropic - TROPIC01 SDK library"
-	depends on PACKAGE_libmbedtls
+	depends on PACKAGE_libopenssl
 	help
 	  Libtropic is a C SDK library for application development with TROPIC01
 	  secure element. It provides APIs for secure communication, cryptographic
@@ -12,10 +12,8 @@ config PACKAGE_libtropic
 	  
 	  Supported platforms:
 	    - Linux SPI
-	    - POSIX TCP (for testing with model)
-	    - POSIX USB dongle
 	  
 	  Crypto backend:
-	    - MbedTLS v4
+	    - OpenSSL
 	  
 	  https://github.com/tropicsquare/libtropic

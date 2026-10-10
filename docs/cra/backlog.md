@@ -90,8 +90,8 @@ Annex I 2(f), 2(c). Design is in [cra-02's README](../../features/cra-02-verifie
 - **3.2 PKCS#11 runtime path with a per-unit pairing key.** `libtropic-pkcs11` has the
   loader but no consumer exercised it on hardware. Needs a PKCS#11 consumer on the unit
   (`pkcs11-test`, or the VPN). *S.*
-- **3.3 Three copies of libtropic** (`libtropic`, `libtropic-pkcs11`, `lt-util`) at three
-  different pinned commits. Unify. *M.*
+- **3.3 Three copies of libtropic.** *Done (branch `feat/libtropic-4.2`):* one pinned libtropic v4.2.0 package; `lt-util` and
+  `libtropic-pkcs11` build against its source tree (OpenSSL crypto layer, Linux SPI hardware layer).
 - **3.4 Bump OpenVPN** (pinned at 2.6.12) after a hardware test. *S-M.*
 - **3.5 Expose `lt-util` MAC-and-Destroy** (`-mac-set`, `-mac-ver` are hidden from the usage
   text) once it is stable; needed by 5.4. *S.*
@@ -106,27 +106,23 @@ Annex I 2(f), 2(c). Design is in [cra-02's README](../../features/cra-02-verifie
   copy-paste block, expose ECDSA signing in `lt-util` (its `-e -s` is EdDSA only, which is why the CSR goes through
   OpenSSL), and connect with an identity enrolled this way against a real CA. `openssl-util` is in cra-03's config
   for the next image build; the final test image does not contain it. *S-M.*
-- **3.10 Debug output that must not ship.** `lt-util` is built with `LT_PRINT_SPI_DATA=1` and prints raw SPI bus bytes, and
-  `libtropic-pkcs11` writes every call (including key handles) to syslog at debug level
+- **3.10 Debug output that must not ship.** *`lt-util` part done:* it is built without raw SPI data printing and
+  logs errors only. Still open: `libtropic-pkcs11` writes every call (including key handles) to syslog at debug level
   (`006-add-syslog-tracing.patch`). Both are useful while bringing up hardware, and both are unwanted on a unit whose
   `logread` anyone on the network can read. Make them build-time options, off in release images. *S.*
-- **3.7 Upgrade libtropic to 4.1** (the feed currently builds 3.0.0 plus the copies bundled in
-  `libtropic-pkcs11` and `lt-util`; see 3.3). Before starting: read the 4.1 release notes for API
-  changes in the areas this repo touches (secure-session start and pairing-key indices,
-  `lt_pairing_key_*`, R-MEM and ECC calls, MAC-and-Destroy, the Linux SPI/GPIO HAL, the engineering
-  sample key symbols); re-base `libtropic-pkcs11` patches 001-007 and the lt-util patches; check the
-  chip's CPU firmware version against what 4.1 expects (older firmware fails I-Memory writes
-  silently, see 4.1). Re-run the whole hardware suite plus a VPN and AWS test afterwards
-  (3.1), because PKCS#11 and the procd respawn timing were tuned against the current stack.
-  Pairs with 3.3 (one libtropic, not three). *M.*
-- **3.8 Replace our `lt-util` with the one that ships with libtropic 4.1.** Today `lt-util` is a
-  bundled snapshot with local patches: SPI device, the ES01 keys, P-256 and full public-key export,
-  the per-unit pairing key loader, `-k -r` / `-k -w`. Moving to the upstream tool means either
-  upstreaming those changes or carrying them as patches, and keeping the command-line surface
-  that the vault (`-i`, `-r`, `-m -s/-r/-e`), cra-04 (`-k`), the AWS scripts and the docs rely
-  on, or updating all of them in one go (the docs already drifted from the real CLI once, see
-  the cra-03 findings). Needs 3.7. Check that the upstream tool exposes MAC-and-Destroy (3.5).
-  *M.*
+- **3.7 Upgrade libtropic.** *Done to v4.2.0 (not 4.1: 4.2 raises the R-MEM read buffer from 444 to 475 bytes).*
+  Verified on an OpenWrt One: chip identification, the secure session with the shared key, R-MEM read,
+  pairing-slot inspection and the per-unit-key refusal rules (`bench.py cra04`, 13 of 13), and a certificate
+  request signed by the chip through `libtropic-pkcs11` that verifies on a PC. *Final image (2026-10-09, rebuilt from a clean
+  container clone 2026-10-10):* flashed clean, `bench.py suite` 56 of 56 both times. Vault `init`/`destroy` and an OpenVPN tunnel were also run on it
+  (see the hardware report). Still to run: the AWS test (3.1).
+  Open: check the chip's firmware version against what 4.2 ships (App FW 2.2.0 update files exist), and decide
+  whether `LT_SILICON_REV` (default `ACAB`) matches the silicon on the board. *S.*
+- **3.8 `lt-util` after the libtropic upgrade.** libtropic 4.x has **no Linux command-line tool**: its "TROPIC01 Util"
+  is a Python program for the USB DevKit only, and the separate `libtropic-util` repository (our source) has no 4.x
+  port. So `lt-util` stays, ported by patch 005 to libtropic 4.2.0 with the same command line. Remaining: upstream our
+  patches (SPI device, P-256 and full public-key export, per-unit pairing key, `-k -r/-w`) or fork the tool; move
+  MAC-and-Destroy from the hand-rolled code to libtropic's `lt_mac_and_destroy()` (3.5). *M.*
 
 ## 4. cra-04 access control (partial)
 

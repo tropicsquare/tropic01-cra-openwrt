@@ -47,7 +47,7 @@ ports are open.
 
 | Package | Purpose |
 |---|---|
-| `libtropic` | Base library for talking to TROPIC01 (secure channel, L2/L3 protocol) |
+| `libtropic` | The one pinned libtropic 4.2.0 source (secure channel, L2/L3 protocol) that the two packages below build against |
 | `libtropic-pkcs11` | PKCS#11 v2.40 Cryptoki module (`libtropic_pkcs11.so`) |
 | `lt-util` | CLI provisioning tool: generate keys, read pubkey, write/read R-MEM slots |
 | `pkcs11-helper` | OpenSSL PKCS#11 engine/provider glue used by OpenVPN |
@@ -68,8 +68,13 @@ you need them.
 | 2 | `002-use-spi-device-structure.patch` | Injects the SPI device/GPIO paths at CMake build time |
 | 3 | `003-use-engineering-sample-keys.patch` | Pairing keys for `ENGINEERING_SAMPLES_01` silicon — **see "What this does NOT fix"** |
 | 4 | `004-add-cko-certificate-from-r-mem.patch` | Exposes the R-MEM cert as a `CKO_CERTIFICATE` object |
-| 5 | `005-add-ecdsa-sign-prehash.patch` | Adds `lt_ecc_ecdsa_sign_prehash()` — critical: without it, a pre-hashed digest from `CKM_ECDSA` gets double-hashed |
 | 6 | `006-add-syslog-tracing.patch` | Adds syslog output for debugging |
+| 7 | `007-load-per-unit-pairing-key.patch` | Loads a per-unit pairing key instead of the shared engineering-sample key, when one is provisioned |
+| 8 | `008-port-to-libtropic-4.2.patch` | Builds against the feed's one libtropic 4.2.0 source tree; signs with libtropic 4.x `lt_ecc_ecdsa_sign()` (32-byte hash, no second hash) |
+
+There is no patch 005 any more: it added a pre-hash signing call to the old bundled libtropic, which 4.x provides natively. A digest longer than 32 bytes passed to `CKM_ECDSA` is cut to its leftmost 32 bytes, a shorter one is refused with `CKR_DATA_LEN_RANGE`.
+
+`libtropic` is built from **one** pinned source (v4.2.0, package `libtropic`). `libtropic-pkcs11` and `lt-util` no longer bundle their own copies: they build against the tree that package installs, with the OpenSSL crypto layer and the Linux SPI hardware layer.
 
 ## R-MEM / ECC slot layout
 

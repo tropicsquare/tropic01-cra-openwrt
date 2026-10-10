@@ -1,5 +1,5 @@
-# gitleaks configuration (used automatically by the lint workflow's secret scan).
-# Keep the default rules and allow exactly two known, public, non-secret things.
+# gitleaks configuration (the lint workflow passes it to the gitleaks scan with --config).
+# Keep the default rules and allow exactly three known, public, non-secret things.
 [extend]
 useDefault = true
 
@@ -13,4 +13,6 @@ regexes = [
   # sha256-crypt hash of the EMPTY string with a fixed salt: a public test value used to
   # reproduce the "empty password stored as a hash" case (see cra-01 and tests/hardware).
   '''\$5\$tropic01x\$[A-Za-z0-9./]+''',
+  # Plaintext marker the vault tests write to prove it is absent from the encrypted image.
+  '''SECRET-MARKER-12345''',
 ]

@@ -8,18 +8,16 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=libtropic
-PKG_VERSION:=3.0.0
+PKG_VERSION:=4.2.0
 PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/tropicsquare/libtropic.git
-# Commit that tag v3.0.0 points to (git ls-remote ...refs/tags/v3.0.0^{}).
-# Pinned to a commit, not the tag, because a tag can be moved or deleted;
-# verified byte-identical to the tarball this package was built and
-# tested against (dl/libtropic-3.0.0.tar.zst from the original fork).
-PKG_SOURCE_VERSION:=e730ebfb585483be2347e8a96d1722806ca8d2ca
-PKG_SOURCE_DATE:=2025-12-02
-PKG_MIRROR_HASH:=c20b2aaad028ffb8ae5f2edec1630f6eea0e428b93877414991d00ba2e21c805
+# Commit that tag v4.2.0 points to (git ls-remote ...refs/tags/v4.2.0^{}).
+# Pinned to a commit, not the tag, because a tag can be moved or deleted.
+PKG_SOURCE_VERSION:=9085ea5387a8a1d5a946c7e4f633c7134e4909a7
+PKG_SOURCE_DATE:=2026-10-02
+PKG_MIRROR_HASH:=7863c96ca8e5bc2a25d89f8c66e14c6a0a93e21c22f6b1c9026b9596458bad67
 
 PKG_MAINTAINER:=Tropic Square
 PKG_LICENSE:=BSD-3-Clause-Clear
@@ -35,7 +33,7 @@ define Package/libtropic
   CATEGORY:=Libraries
   TITLE:=TROPIC01 SDK library
   URL:=https://github.com/tropicsquare/libtropic
-  DEPENDS:=+libmbedtls
+  DEPENDS:=+libopenssl
 endef
 
 define Package/libtropic/description
@@ -55,8 +53,11 @@ CMAKE_OPTIONS += \
 	-DLT_PRINT_SPI_DATA=OFF
 
 # Note: HAL (Hardware Abstraction Layer) and CAL (Crypto Abstraction Layer)
-# need to be configured by the consumer application as per libtropic design.
-# This package builds libtropic as a static library without HAL/CAL.
+# are chosen by the consumer application, as libtropic intends. This package
+# fetches the one pinned source, builds the core as a static library to check
+# that it compiles, and installs the source tree under usr/src/libtropic so
+# that lt-util and libtropic-pkcs11 build the same code instead of each
+# bundling its own copy.
 
 define Build/Install
 	# No install target in CMake, library is built in-tree
@@ -72,29 +73,16 @@ define Build/InstallDev
 	$(INSTALL_DIR) $(1)/usr/lib
 	$(CP) $(PKG_BUILD_DIR)/libtropic.a $(1)/usr/lib/
 	
-	# Install CAL (Crypto Abstraction Layer) headers and sources for mbedtls
-	$(INSTALL_DIR) $(1)/usr/include/libtropic/cal/mbedtls_v4
-	$(CP) $(PKG_BUILD_DIR)/cal/mbedtls_v4/*.h $(1)/usr/include/libtropic/cal/mbedtls_v4/ 2>/dev/null || true
-	$(CP) $(PKG_BUILD_DIR)/cal/mbedtls_v4/*.c $(1)/usr/include/libtropic/cal/mbedtls_v4/ 2>/dev/null || true
-	$(CP) $(PKG_BUILD_DIR)/cal/mbedtls_v4/CMakeLists.txt $(1)/usr/include/libtropic/cal/mbedtls_v4/ 2>/dev/null || true
-	
-	# Install HAL (Hardware Abstraction Layer) for Linux SPI
-	$(INSTALL_DIR) $(1)/usr/include/libtropic/hal/linux/spi
-	$(CP) $(PKG_BUILD_DIR)/hal/linux/spi/*.h $(1)/usr/include/libtropic/hal/linux/spi/ 2>/dev/null || true
-	$(CP) $(PKG_BUILD_DIR)/hal/linux/spi/*.c $(1)/usr/include/libtropic/hal/linux/spi/ 2>/dev/null || true
-	$(CP) $(PKG_BUILD_DIR)/hal/linux/spi/CMakeLists.txt $(1)/usr/include/libtropic/hal/linux/spi/ 2>/dev/null || true
-	
-	# Install HAL for POSIX systems (TCP)
-	$(INSTALL_DIR) $(1)/usr/include/libtropic/hal/posix/tcp
-	$(CP) $(PKG_BUILD_DIR)/hal/posix/tcp/*.h $(1)/usr/include/libtropic/hal/posix/tcp/ 2>/dev/null || true
-	$(CP) $(PKG_BUILD_DIR)/hal/posix/tcp/*.c $(1)/usr/include/libtropic/hal/posix/tcp/ 2>/dev/null || true
-	$(CP) $(PKG_BUILD_DIR)/hal/posix/tcp/CMakeLists.txt $(1)/usr/include/libtropic/hal/posix/tcp/ 2>/dev/null || true
-	
-	# Install HAL for POSIX systems (USB dongle)
-	$(INSTALL_DIR) $(1)/usr/include/libtropic/hal/posix/usb_dongle
-	$(CP) $(PKG_BUILD_DIR)/hal/posix/usb_dongle/*.h $(1)/usr/include/libtropic/hal/posix/usb_dongle/ 2>/dev/null || true
-	$(CP) $(PKG_BUILD_DIR)/hal/posix/usb_dongle/*.c $(1)/usr/include/libtropic/hal/posix/usb_dongle/ 2>/dev/null || true
-	$(CP) $(PKG_BUILD_DIR)/hal/posix/usb_dongle/CMakeLists.txt $(1)/usr/include/libtropic/hal/posix/usb_dongle/ 2>/dev/null || true
+	# Install the sources that consumers build against. libtropic is configured by
+	# compile definitions that must match between the library and its users (silicon
+	# revision, retry counts, timeouts), so consumers add this tree with CMake's
+	# add_subdirectory() and pick their HAL and CAL from it. One pinned source, no
+	# bundled copies.
+	$(INSTALL_DIR) $(1)/usr/src/libtropic
+	$(CP) $(PKG_BUILD_DIR)/CMakeLists.txt $(PKG_BUILD_DIR)/LICENSE.md \
+		$(PKG_BUILD_DIR)/cmake $(PKG_BUILD_DIR)/cal $(PKG_BUILD_DIR)/hal \
+		$(PKG_BUILD_DIR)/include $(PKG_BUILD_DIR)/src \
+		$(PKG_BUILD_DIR)/TROPIC01_fw_update_files $(1)/usr/src/libtropic/
 endef
 
 define Package/libtropic/install
