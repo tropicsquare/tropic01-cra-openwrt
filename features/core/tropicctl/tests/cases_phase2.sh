@@ -182,16 +182,23 @@ check "restrict-shared refuses a unit key that cannot rewrite the config" 9 "$(s
 # I-config bits
 fresh
 check "burn without its flag: refused" 9 "$(rc config burn UAP_PING 3)"
-check "--dry-run burn" 0 "$(rc --dry-run config burn UAP_PING 3)"
-check "nothing burned by the dry run" "I TR01_CFG_UAP_PING 0xffffffff" "$(T config get UAP_PING 2>/dev/null | grep '^I')"
-check "burn a bit" 0 "$(rc config burn UAP_PING 3 --yes-burn-i-config-bit)"
+check "--dry-run checks the firmware too: the bench chip's 0.1.2 is refused" 9 "$(rc --dry-run config burn UAP_PING 3)"
+check "the bench chip's firmware (0.1.2) is older than 2.0.0: refused" 9 "$(rc config burn UAP_PING 3 --yes-burn-i-config-bit)"
+check_contains "naming the version" "firmware is 0.1.2" "$(cat err.txt)"
+check "nothing was burned" "I TR01_CFG_UAP_PING 0xffffffff" "$(T config get UAP_PING 2>/dev/null | grep '^I')"
+echo "00000002 00000100" > chip/fw   # 2.0.0
+check "--dry-run burn with firmware 2.0.0" 0 "$(rc --dry-run config burn UAP_PING 3)"
+check "the dry run burned nothing" "I TR01_CFG_UAP_PING 0xffffffff" "$(T config get UAP_PING 2>/dev/null | grep '^I')"
+check "burn a bit (firmware 2.0.0)" 0 "$(rc config burn UAP_PING 3 --yes-burn-i-config-bit)"
 check "the bit is cleared (and only that bit)" "I TR01_CFG_UAP_PING 0xfffffff7" "$(T config get UAP_PING 2>/dev/null | grep '^I')"
 check "burning a cleared bit is a no-op" 0 "$(rc config burn UAP_PING 3 --yes-burn-i-config-bit)"
 check "bit 40" 2 "$(rc config burn UAP_PING 40 --yes-burn-i-config-bit)"
 check "an unknown object: not found" 6 "$(rc config burn NOPE 3 --yes-burn-i-config-bit)"
 check "a silent write failure is caught: exit 8" 8 "$(TROPICCTL_FAKE_ICONFIG_SILENT=1 rc config burn UAP_PING 5 --yes-burn-i-config-bit)"
-echo "00010000 00010300" > chip/fw
-check "firmware not shown to be 2.0.0 or newer: refused" 9 "$(rc config burn UAP_PING 6 --yes-burn-i-config-bit)"
+echo "00000102 00000100" > chip/fw   # 2.1.0 is fine; 1.2.0 below is not
+check "firmware 2.1.0 is accepted" 0 "$(rc config burn UAP_PING 6 --yes-burn-i-config-bit)"
+echo "00000201 00000100" > chip/fw   # 1.2.0
+check "firmware 1.2.0 is refused" 9 "$(rc config burn UAP_PING 7 --yes-burn-i-config-bit)"
 
 # ------------------------------------------------------------------ MAC-and-Destroy (PIN scheme of the application note)
 fresh

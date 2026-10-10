@@ -224,8 +224,9 @@ int cmd_config_burn(ctx_t *x, args_t *a)
 	if ((rc = ctx_session(x))) return rc;
 	st = chip_fw_versions(x->chip, rv, sv, err);
 	if (st != CHIP_OK) return out_chip_error(st, "cannot read the firmware version", err);
-	if (rv[1] < 2)
-		return out_error(TC_REFUSED, "the firmware version bytes (%02x %02x %02x %02x) do not show CPU firmware 2.0.0 or newer; older firmware can fail I-Memory writes silently", rv[0], rv[1], rv[2], rv[3]);
+	/* libtropic prints a firmware version as byte 3 . byte 2 . byte 1 (examples/linux/spi/fw_update): byte 3 is the major */
+	if (rv[3] < 2)
+		return out_error(TC_REFUSED, "the CPU firmware is %u.%u.%u, older than 2.0.0; firmware older than 2.0.0 can fail I-Memory writes silently", rv[3], rv[2], rv[1]);
 	if ((rc = read_objs(x, o))) return rc;
 	i = cfg_find(o, a->argv[0]);
 	if (i < 0) return out_error(TC_NOTFOUND, "no configuration object named %s", a->argv[0]);

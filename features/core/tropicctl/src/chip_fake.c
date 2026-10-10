@@ -133,7 +133,7 @@ static void make_defaults(const char *dir)
 	fclose(f);
 	snprintf(p, sizeof p, "%s/fw", dir);
 	f = fopen(p, "w");
-	fputs("00020100 00010300\n", f); /* [measured] App FW 2.1.0, SPECT FW 1.3.0 by libtropic 4.1's notes */
+	fputs("00020100 00010300\n", f); /* [measured] the bench chip: bytes 00 02 01 00 and 00 01 03 00 = RISC-V FW 0.1.2, SPECT FW 0.3.1 */
 	fclose(f);
 }
 

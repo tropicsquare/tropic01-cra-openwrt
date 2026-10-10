@@ -117,7 +117,7 @@ Annex I 2(f), 2(c). Design is in [cra-02's README](../../features/cra-02-verifie
   request signed by the chip through `libtropic-pkcs11` that verifies on a PC. *Final image (2026-10-09, rebuilt from a clean
   container clone 2026-10-10):* flashed clean, `bench.py suite` 56 of 56 both times. Vault `init`/`destroy` and an OpenVPN tunnel were also run on it
   (see the hardware report). Still to run: the AWS test (3.1).
-  Open: check the chip's firmware version against what 4.2 ships (App FW 2.2.0 update files exist), and decide
+  Open: the bench chip runs RISC-V firmware **0.1.2** and SPECT **0.3.1** (older than 2.0.0; 4.2 ships 2.2.0 update files; see the hardware report); decide whether a firmware update is wanted, and
   whether `LT_SILICON_REV` (default `ACAB`) matches the silicon on the board. *S.*
 - **3.13 A new, documented command-line tool for TROPIC01 (`tropicctl`), replacing the patched `lt-util`.** Specification:
   [`features/core/tropicctl/SPEC.md`](../../features/core/tropicctl/SPEC.md). An OpenWrt package in this feed, written so

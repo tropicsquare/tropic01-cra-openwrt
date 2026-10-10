@@ -89,7 +89,7 @@ SHA-256 `814e8fb05ad3b0da4f27391390c2d0f4af5391d1cf4a489cfa328d8db1ae6ec3`.
   command, because libtropic 4.x needs the application to supply the crypto context of the handle.
 
 Not re-run in the first 4.2.0 run (done later, see below): the vault `init`/`destroy`, an OpenVPN tunnel
-(the bench has no WAN link) and the AWS test. The chip's firmware version has not been compared with what 4.2 ships.
+(the bench has no WAN link) and the AWS test. The chip's firmware has been compared with what 4.2 ships: it is **much older** (see the correction below).
 
 ### Clean-container build (2026-10-10)
 
@@ -131,7 +131,7 @@ run, removed, and OpenVPN restarted. Only read commands were run; nothing was wr
 | Check | Result |
 |---|---|
 | `info chip` | the same CHIP_ID block `lt-util -i` prints (TROPIC01-ES) |
-| `info fw` | `00 02 01 00` / `00 01 03 00`, and as JSON `{"riscv_fw":"00020100","spect_fw":"00010300"}` |
+| `info fw` | `00 02 01 00` / `00 01 03 00`, which libtropic's own example reads as byte 3 . byte 2 . byte 1: **RISC-V firmware 0.1.2, SPECT firmware 0.3.1** (see the correction below) |
 | `session test` | opens with the shared key; warns on stderr that no per-unit key exists |
 | `pairing list` | slot 0 populated, slots 1 to 3 empty (the fake's default, now **measured**) |
 | `config dump` | in legacy mode (`lt-util -x -r`) **byte-identical** to the earlier survey output |
@@ -166,3 +166,15 @@ invalidation, R-config rewrite, I-config burn, MAC-and-Destroy, counter init and
 | **ECDSA on the real chip** | `ecc sign 0 --der` over a message; **OpenSSL on the PC verifies it** against the PEM public key from `ecc pub 0 --format pem`; that key is identical to the public key in the certificate in R-MEM slot 1 |
 | EdDSA on a P-256 slot | exit 2 (refused, not a wrong answer) |
 | legacy mode | `lt-util -x -f` exit 0; `lt-util -k -r 1` on the empty slot exit 1 |
+
+### Correction: the bench chip's firmware version (2026-10-11)
+
+The firmware version bytes `00 02 01 00` (RISC-V) and `00 01 03 00` (SPECT) were first read as "App FW 2.1.0 and SPECT FW
+1.3.0" by matching them against release notes. That was wrong. libtropic's own example (`fw_update`) prints a version as
+`byte 3 . byte 2 . byte 1`, which gives **RISC-V 0.1.2 and SPECT 0.3.1**. The same reading of the TROPIC01 software model's
+bytes (`00 00 02 02`, `00 00 03 01`) gives 2.2.0 and 1.3.0, the versions libtropic 4.2 targets. So the bench chip runs
+**firmware older than 2.0.0**: I-Memory writes (pairing slots, I-config) can fail silently there, which makes the read-back
+after every such write essential, and it is far behind the 2.2.0 update files libtropic 4.2 ships. A firmware update is
+itself a risky step and has not been considered. Consequences: `tropicctl config burn` (which requires 2.0.0 or newer)
+refuses on this chip, as intended; the first version of that gate looked at the wrong byte and would have allowed it. That
+is fixed and has a regression test. Any statement elsewhere that the bench chip has firmware 2.1.0 is wrong.

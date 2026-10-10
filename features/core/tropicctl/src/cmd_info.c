@@ -35,10 +35,13 @@ int cmd_info_chip(ctx_t *x, args_t *a)
 	return TC_OK;
 }
 
+/* libtropic prints a firmware version as byte 3 . byte 2 . byte 1 (its fw_update example); byte 0 is not part of it */
+static void fw_version(char *buf, size_t n, const uint8_t v[4]) { snprintf(buf, n, "%u.%u.%u", v[3], v[2], v[1]); }
+
 int cmd_info_fw(ctx_t *x, args_t *a)
 {
 	const cmd_t *c = cmd_find("info", "fw");
-	char err[CHIP_ERRLEN] = "";
+	char err[CHIP_ERRLEN] = "", rver[24], sver[24];
 	const char *bad;
 	uint8_t r[4], s[4];
 	chip_status_t st;
@@ -47,15 +50,17 @@ int cmd_info_fw(ctx_t *x, args_t *a)
 	if ((rc = ctx_chip(x))) return rc;
 	st = chip_fw_versions(x->chip, r, s, err);
 	if (st != CHIP_OK) return out_chip_error(st, "cannot read the firmware versions", err);
+	fw_version(rver, sizeof rver, r);
+	fw_version(sver, sizeof sver, s);
 	if (g_json) {
 		printf("{\"riscv_fw\":");
 		json_hex(stdout, r, 4);
 		printf(",\"spect_fw\":");
 		json_hex(stdout, s, 4);
-		printf("}\n");
+		printf(",\"riscv_version\":\"%s\",\"spect_version\":\"%s\"}\n", rver, sver);
 	} else {
-		printf("RISCV_FW_VER %02x %02x %02x %02x\nSPECT_FW_VER %02x %02x %02x %02x\n", r[0], r[1], r[2], r[3], s[0], s[1],
-		       s[2], s[3]);
+		printf("RISCV_FW_VER %02x %02x %02x %02x\nSPECT_FW_VER %02x %02x %02x %02x\n", r[0], r[1], r[2], r[3], s[0], s[1], s[2], s[3]);
+		if (!g_legacy) printf("RISC-V firmware %s, SPECT firmware %s\n", rver, sver); /* legacy output stays as it was */
 	}
 	return TC_OK;
 }

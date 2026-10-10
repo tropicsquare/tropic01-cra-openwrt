@@ -60,7 +60,7 @@ Reads CHIP_ID. No secure session is needed. The text is the layout `lt-util -i` 
 
 Class **R**. Print the RISC-V and SPECT firmware version bytes
 
-Prints the version bytes as the chip reports them. No secure session is needed.
+Prints the version bytes as the chip reports them and the version they stand for, read as libtropic reads them (byte 3 . byte 2 . byte 1; byte 0 is not part of the version). No secure session is needed.
 
 #### `info mode `
 
@@ -214,7 +214,7 @@ The same safe sequence as rewrite, for a backup file that config rewrite saved.
 
 Class **I**. Clear one I-config bit (one-way)
 
-IRREVERSIBLE: an I-config bit only goes from 1 to 0. Refused unless the firmware version bytes show CPU firmware 2.0.0 or newer (older firmware can fail the write silently); the bit is read back afterwards.
+IRREVERSIBLE: an I-config bit only goes from 1 to 0. Refused unless the CPU firmware is 2.0.0 or newer (older firmware can fail the write silently); the bit is read back afterwards.
 
 ### mnd
 

@@ -12,7 +12,8 @@ const cmd_t g_cmds[] = {
      "group is a hex string, as libtropic defines the groups, without interpretation.",
      cmd_info_chip},
     {"info", "fw", 'R', "", "Print the RISC-V and SPECT firmware version bytes",
-     "Prints the version bytes as the chip reports them. No secure session is needed.", cmd_info_fw},
+     "Prints the version bytes as the chip reports them and the version they stand for, read as libtropic reads them (byte 3 . "
+     "byte 2 . byte 1; byte 0 is not part of the version). No secure session is needed.", cmd_info_fw},
     {"info", "mode", 'R', "", "Print the chip mode (application or maintenance)",
      "No secure session is needed. Most commands need the chip in application mode.", cmd_info_mode},
     {"info", "cert", 'R', "[--out-dir DIR]", "List the chip's certificate store",
@@ -108,8 +109,8 @@ const cmd_t g_cmds[] = {
     {"config", "restore", 'H', "--in BACKUP --yes-rewrite-r-config", "Write a saved R-config back",
      "The same safe sequence as rewrite, for a backup file that config rewrite saved.", cmd_config_restore},
     {"config", "burn", 'I', "<name> <bit> --yes-burn-i-config-bit", "Clear one I-config bit (one-way)",
-     "IRREVERSIBLE: an I-config bit only goes from 1 to 0. Refused unless the firmware version bytes show CPU firmware 2.0.0 "
-     "or newer (older firmware can fail the write silently); the bit is read back afterwards.",
+     "IRREVERSIBLE: an I-config bit only goes from 1 to 0. Refused unless the CPU firmware is 2.0.0 or newer (older firmware "
+     "can fail the write silently); the bit is read back afterwards.",
      cmd_config_burn},
     /* mnd */
     {"mnd", "setup", 'I', "--state FILE --out KEYFILE --yes-setup-mnd [--slots N] [--base-slot B] [--add-file F] [--replace]", "Set a new PIN (MAC-and-Destroy)",

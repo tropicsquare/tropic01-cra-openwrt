@@ -53,12 +53,14 @@ check "info chip" 0 "$(rc info chip)"
 check_contains "info chip prints the CHIP_ID block" "CHIP_ID ver" "$(cat out.txt)"
 check "info chip needs no session (no key warning)" "" "$(cat err.txt)"
 check "info fw" 0 "$(rc info fw)"
-check "info fw output" "RISCV_FW_VER 00 02 01 00
-SPECT_FW_VER 00 01 03 00" "$(cat out.txt)"
+check "info fw output (raw bytes, then the version they stand for)" "RISCV_FW_VER 00 02 01 00
+SPECT_FW_VER 00 01 03 00
+RISC-V firmware 0.1.2, SPECT firmware 0.3.1" "$(cat out.txt)"
 if [ "$HAVE_PY" = 1 ]; then
 	rc --json info chip >/dev/null; check "info chip --json is valid JSON" valid "$(json_ok out.txt)"
 	rc --json info fw >/dev/null; check "info fw --json is valid JSON" valid "$(json_ok out.txt)"
 	check_contains "info fw --json" '"riscv_fw":"00020100"' "$(cat out.txt)"
+	check_contains "info fw --json decodes the version" '"riscv_version":"0.1.2"' "$(cat out.txt)"
 fi
 
 # ------------------------------------------------------------------ sessions and keys

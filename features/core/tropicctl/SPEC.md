@@ -185,7 +185,7 @@ Arguments in `<>` are required. Slot numbers are validated before the chip is to
 | Command | Does |
 |---|---|
 | `info chip` | chip identification (what `lt-util -i` prints), as text or `--json` |
-| `info fw` | RISC-V and SPECT firmware version bytes as the chip reports them |
+| `info fw` | RISC-V and SPECT firmware version bytes as the chip reports them, and the version they stand for (byte 3 . byte 2 . byte 1, as libtropic's own example prints it) |
 | `info cert [--out-dir DIR]` | the chip's certificate store: the length of each certificate, and with `--out-dir` each as `certN.der`; verifying the chain is not done |
 | `info mode` | whether the chip is in application, maintenance or start-up mode |
 
@@ -238,7 +238,7 @@ prints, so nothing is invented between the file and the chip.
 | `config restrict-shared --unit-slot N [--out FILE\|-]` | R | build a file from the chip's current R-config with pairing key 0 (the shared key) removed from every access object except PING. Refuses unless slot N holds a key and has the right to read and rewrite the configuration. Changes nothing on the chip |
 | `config rewrite --in FILE --yes-rewrite-r-config [--backup FILE] [--include-non-access]` | **H** | validate, save the current R-config to a backup, **erase, write, read back**. Refuses a file that would take the right to read or rewrite the configuration from the key of this session, a file that changes objects that are not access rights (unless `--include-non-access`), and any case where the backup cannot be written. If the write fails after the erase it says so and names the backup |
 | `config restore --in BACKUP --yes-rewrite-r-config` | **H** | the same sequence for a backup file |
-| `config burn <name> <bit> --yes-burn-i-config-bit` | **I** | clear one I-config bit (one-way); refused unless the firmware version bytes show CPU firmware 2.0.0 or newer; read back |
+| `config burn <name> <bit> --yes-burn-i-config-bit` | **I** | clear one I-config bit (one-way); refused unless the CPU firmware is 2.0.0 or newer (the version is read as libtropic reads it: byte 3 . byte 2 . byte 1); read back |
 
 There is no raw "write one R-config object" command, because the chip's erratum makes it dangerous: only
 `chip_rconfig_rewrite()` writes the R-config, and it always erases first.

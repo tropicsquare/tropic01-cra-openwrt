@@ -53,7 +53,7 @@ print the version / this help
 .B info fw
 
 .br
-[R] Print the RISC\-V and SPECT firmware version bytes. Prints the version bytes as the chip reports them. No secure session is needed.
+[R] Print the RISC\-V and SPECT firmware version bytes. Prints the version bytes as the chip reports them and the version they stand for, read as libtropic reads them (byte 3 . byte 2 . byte 1; byte 0 is not part of the version). No secure session is needed.
 .TP
 .B info mode
 
@@ -173,7 +173,7 @@ print the version / this help
 .B config burn
 <name> <bit> \-\-yes\-burn\-i\-config\-bit
 .br
-[I] Clear one I\-config bit (one\-way). IRREVERSIBLE: an I\-config bit only goes from 1 to 0. Refused unless the firmware version bytes show CPU firmware 2.0.0 or newer (older firmware can fail the write silently); the bit is read back afterwards.
+[I] Clear one I\-config bit (one\-way). IRREVERSIBLE: an I\-config bit only goes from 1 to 0. Refused unless the CPU firmware is 2.0.0 or newer (older firmware can fail the write silently); the bit is read back afterwards.
 .TP
 .B mnd setup
 \-\-state FILE \-\-out KEYFILE \-\-yes\-setup\-mnd [\-\-slots N] [\-\-base\-slot B] [\-\-add\-file F] [\-\-replace]
