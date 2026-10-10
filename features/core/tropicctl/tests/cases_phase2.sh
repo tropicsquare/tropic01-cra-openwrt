@@ -143,13 +143,16 @@ check "the shared key still reads R-MEM after the dry run" 6 "$(rc --key shared 
 check "rewrite" 0 "$(rc --key unit config rewrite --in r.cfg --yes-rewrite-r-config --backup bk.cfg)"
 check_contains "read back" "rewritten and read back correctly" "$(cat out.txt)"
 check "the backup was saved first" 27 "$(grep -c '^R ' bk.cfg)"
-check "the shared key is now denied R-MEM reads" 5 "$(rc --key shared mem read 1)"
+check "the chip enforces the R-config it loaded at start-up: until a restart the shared key still reads R-MEM" 6 "$(rc --key shared mem read 1)"
+check "chip reboot" 0 "$(rc chip reboot)"
+check "after the restart the shared key is denied R-MEM reads" 5 "$(rc --key shared mem read 1)"
 check "the shared key can still open a session (PING stays)" 0 "$(rc --key shared session test)"
 check "the unit key still works" 6 "$(rc --key unit mem read 1)"
 check "the config on the chip equals the file" 0 "$(rc --key unit config diff --in r.cfg --check)"
 check "a second rewrite of the same file is a no-op" 0 "$(rc --key unit config rewrite --in r.cfg --yes-rewrite-r-config)"
 check_contains "and says so" "nothing to do" "$(cat err.txt)"
 check "restore with the unit key" 0 "$(rc --key unit config restore --in bk.cfg --yes-rewrite-r-config --backup bk2.cfg)"
+T chip reboot >/dev/null 2>&1
 check "the shared key has its rights again" 6 "$(rc --key shared mem read 1)"
 # guards
 fresh; setkey 1

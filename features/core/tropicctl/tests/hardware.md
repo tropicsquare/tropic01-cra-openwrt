@@ -43,3 +43,18 @@ in use. Run them in this order, reading the output after each, and record the re
    (`pairing invalidate`, `config burn`).
 
 Differences between the chip and the fake are fixed in the fake first.
+
+## Firmware update
+
+Run on a spare chip only; an update cannot be undone (a chip never accepts an older version).
+
+1. `tropicctl fw status` and `tropicctl config get START_UP`: the images must match the silicon revision (this build:
+   `fw status` prints it), and Maintenance Mode (bit 3) must be set in the I-config.
+2. A chip with production provisioning refuses the engineering key: use `--key prod0` for every command.
+3. `tropicctl --key prod0 --dry-run fw update --dir DIR --yes-update-firmware`, then without `--dry-run`. DIR holds one
+   `fw_v*_signed_chunks.bin` and one `spect_app-v*_signed_chunks.bin` from libtropic's `TROPIC01_fw_update_files/`
+   (`boot_v_2_0_1` for silicon ACAB, `boot_v_1_0_1` for ABAB). Run it from a stable power supply, in the background if
+   it goes over SSH, and read the log.
+4. `tropicctl fw status`, then `tropicctl fw maintenance off --yes-rewrite-r-config` and a `chip reboot`.
+5. After any R-config rewrite, check the change is not in force until `tropicctl chip reboot` (the fake and the model
+   both assume this; record what the chip does).

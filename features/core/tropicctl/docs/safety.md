@@ -6,7 +6,7 @@ Every command declares one safety class, shown in `tropicctl help` and in the [r
 |---|---|---|
 | **R** read-only | changes nothing on the chip | none |
 | **W** reversible write | can be undone by another command (an R-MEM slot, an ECC key) | `--dry-run` shows what would happen |
-| **I** irreversible | cannot be undone: a pairing-slot write or invalidation, an I-config bit, counter initialisation | a named `--yes-<operation>` flag; the target is re-read first and must be in the expected state |
+| **I** irreversible | cannot be undone: a pairing-slot write or invalidation, an I-config bit, counter initialisation, a firmware update | a named `--yes-<operation>` flag; the target is re-read first and must be in the expected state |
 | **H** hazardous | can leave the chip unusable if done wrong: rewriting the R-config | the same flag, and the tool performs the safe sequence itself |
 
 The classes of the commands are in the [reference](reference.md). Irreversible (I) and hazardous (H) commands consume a named
@@ -34,6 +34,9 @@ The classes of the commands are in the [reference](reference.md). Irreversible (
 - `mnd check`: the decremented attempt count is saved before the chip is touched.
 - `config burn`: refused unless the firmware version bytes show CPU firmware 2.0.0 or newer.
 - `counter update`: refused at zero before the chip is asked.
+- `fw update`: refused for images of another silicon revision, for a downgrade, and when Maintenance Mode is disabled in the
+  I-config; the versions are read back afterwards. `config rewrite` and `fw maintenance` change what the chip enforces only
+  after a restart (`chip reboot`).
 
 ## Secrets
 

@@ -99,7 +99,13 @@ int keys_select(const char *source, pairing_key_t *out, char *desc, size_t descl
 		snprintf(desc, desclen, "key file %s, slot %ld", path, slot);
 		return TC_OK;
 	}
+	if (strcmp(source, "es01") == 0 || strcmp(source, "prod0") == 0) {
+		chip_named_key(source, out);
+		out_notice("using the %s slot-0 key published with libtropic", strcmp(source, "es01") == 0 ? "engineering-sample (ES01)" : "production (prod0)");
+		snprintf(desc, desclen, "%s slot-0 key, slot 0", source);
+		return TC_OK;
+	}
 	if (strcmp(source, "pin") == 0)
 		return out_error(TC_REFUSED, "--key pin (PIN-protected key) is not available in this version");
-	return out_error(TC_USAGE, "unknown key source '%s' (auto, shared, unit, file:PATH:SLOT)", source);
+	return out_error(TC_USAGE, "unknown key source '%s' (auto, shared, es01, prod0, unit, file:PATH:SLOT)", source);
 }

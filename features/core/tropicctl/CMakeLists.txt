@@ -20,7 +20,7 @@ find_package(OpenSSL REQUIRED) # host-side cryptography (keyed hash, authenticat
 set(SRC
     src/main.c src/cmd_table.c src/legacy.c src/ctx.c src/keys.c src/lock.c src/output.c src/errors.c src/args.c
     src/files.c src/cmd_info.c src/cmd_rng.c src/cmd_mem.c src/cmd_pairing.c src/cmd_config.c src/cmd_session.c
-    src/cmd_help.c src/crypto.c src/uap.c src/safety.c src/mnd.c src/pin.c src/cfgfile.c src/cmd_ecc.c src/cmd_mnd.c src/cmd_counter.c)
+    src/cmd_help.c src/crypto.c src/uap.c src/safety.c src/mnd.c src/pin.c src/cfgfile.c src/cmd_ecc.c src/cmd_mnd.c src/cmd_counter.c src/cmd_fw.c)
 
 if(TROPICCTL_CHIP STREQUAL "fake")
     add_executable(tropicctl ${SRC} src/chip_fake.c src/ecc_host.c)

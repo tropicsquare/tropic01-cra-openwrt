@@ -6,6 +6,9 @@
  *   rmem/N            content of R-MEM slot N (missing = empty)
  *   rconfig, iconfig  one "NAME 0xVALUE" line per configuration object
  *   fw                "RISCV SPECT" as 8 hex digits each
+ *   rconfig.active    exists only between an R-config rewrite and the next reboot: the R-config the chip enforces (the chip
+ *                     loads its R-config at start-up). Without it the file rconfig is in force.
+ *   silicon           "ACAB" or "ABAB" (missing = CHIP_ID v0.0.0.1, which has no silicon field)
  *   down              if present, the chip is unreachable
  *   ecc/N.key .curve .origin   an ECC key (the fake keeps the private key; a real chip never exposes it)
  *   mnd/N             a MAC-and-Destroy slot (32 bytes); mnd_keys the two keys of the chip's keyed functions
@@ -19,9 +22,15 @@
  * TROPICCTL_FAKE_CONFIG_FAIL_AFTER_ERASE=1 fails the R-config write after the erase;
  * TROPICCTL_FAKE_ICONFIG_SILENT=1 reports an I-config bit write as done without changing it;
  * TROPICCTL_FAKE_CONFIG_PARTIAL=1 writes the R-config with the last object left at its default;
- * TROPICCTL_FAKE_MND_FAIL=1 makes every MAC-and-Destroy sequence fail with a chip error.
+ * TROPICCTL_FAKE_MND_FAIL=1 makes every MAC-and-Destroy sequence fail with a chip error;
+ * TROPICCTL_FAKE_SH0=prod0 at creation puts the production slot-0 key in pairing slot 0 instead of the engineering key;
+ * TROPICCTL_FAKE_FWUPDATE_FAIL=1 makes a firmware update fail; TROPICCTL_FAKE_FWUPDATE_SILENT=1 reports it done without changing the version.
+ * [assumed] a firmware update needs Maintenance Mode (bit 3 of START_UP) in the I-config and in the R-config in force, and
+ * a chip never accepts an older version (libtropic FAQ).
  * [measured 2026-10-11] an ECC slot that was never written answers like an empty one, a counter that was never initialised
- * answers LT_L3_COUNTER_INVALID. [assumed] erasing the R-config returns the objects to the defaults the fake starts with.
+ * answers LT_L3_COUNTER_INVALID. [measured 2026-10-10, spare chip] a counter can be initialised again after it reached 0,
+ * the largest value 4294967294 is accepted, I-config bit burn works on firmware 2.2.0, the 475-byte R-MEM slot works,
+ * and ECC keys stored from OpenSSL give the same public key. [assumed] erasing the R-config returns the objects to the defaults the fake starts with.
  *
  * Every rule below is labelled:  [measured] checked on the bench chip (docs/cra/hardware-test-report.md), or
  * [assumed] taken from libtropic's headers or the datasheet and still to be confirmed on a chip. Tests that depend on
@@ -51,6 +60,11 @@ static const uint8_t SH0_PRIV[32] = {0xd0, 0x99, 0x92, 0xb1, 0xf1, 0x7a, 0xbc, 0
 static const uint8_t SH0_PUB[32] = {0xe7, 0xf7, 0x35, 0xba, 0x19, 0xa3, 0x3f, 0xd6, 0x73, 0x23, 0xab,
                                     0x37, 0x26, 0x2d, 0xe5, 0x36, 0x08, 0xca, 0x57, 0x85, 0x76, 0x53,
                                     0x43, 0x52, 0xe1, 0x8f, 0x64, 0xe6, 0x13, 0xd3, 0x8d, 0x54};
+
+/* [measured 2026-10-10] a production-provisioned chip (the spare chip) answers to this slot-0 public key instead */
+static const uint8_t SH0_PUB_PROD0[32] = {0xf9, 0x75, 0xeb, 0x3c, 0x2f, 0xd7, 0x90, 0xc9, 0x6f, 0x29, 0x4f,
+                                    0x15, 0x57, 0xa5, 0x03, 0x17, 0x80, 0xc9, 0xaa, 0xfa, 0x14, 0x0d,
+                                    0xa2, 0x8f, 0x55, 0xe7, 0x51, 0x57, 0x37, 0xb2, 0x50, 0x2c};
 
 static const char *const CFG_NAMES[CHIP_CONFIG_OBJ_CNT] = {
     "TR01_CFG_START_UP",
@@ -120,7 +134,10 @@ static void make_defaults(const char *dir)
 	snprintf(p, sizeof p, "%s/pairing", dir); mkdir(dir, 0700); mkdir(p, 0700);
 	snprintf(p, sizeof p, "%s/rmem", dir); mkdir(p, 0700);
 	snprintf(p, sizeof p, "%s/pairing/0", dir);
-	write_file(p, SH0_PUB, 32);
+	{
+		const char *sh0 = getenv("TROPICCTL_FAKE_SH0");
+		write_file(p, sh0 && strcmp(sh0, "prod0") == 0 ? SH0_PUB_PROD0 : SH0_PUB, 32);
+	}
 	/* [measured] bench chip, 2026-10-10: R-config all ones except START_UP 0xffffffef; I-config all ones; every access
 	 * object 0xffffffff (all pairing keys may run every command) */
 	snprintf(p, sizeof p, "%s/rconfig", dir);
@@ -183,6 +200,21 @@ void chip_shared_key(pairing_key_t *out)
 	out->slot = 0;
 }
 
+int chip_named_key(const char *name, pairing_key_t *out)
+{
+	if (strcmp(name, "es01") == 0) {
+		chip_shared_key(out);
+		return 1;
+	}
+	if (strcmp(name, "prod0") == 0) {
+		memset(out->priv, 0, 32); /* the fake compares public keys only; the real private half is in libtropic */
+		memcpy(out->pub, SH0_PUB_PROD0, 32);
+		out->slot = 0;
+		return 1;
+	}
+	return 0;
+}
+
 chip_status_t chip_session(chip_t *c, const pairing_key_t *key, char *err)
 {
 	uint8_t have[32];
@@ -228,8 +260,9 @@ static uint32_t cfg_word(const chip_t *c, const char *file, const char *name)
 	return 0xffffffffu;
 }
 
-/* Access objects: see uap.h. The layout comes from libtropic's own example; it has not been confirmed by changing a
- * configuration on a chip, so it stays [assumed] until a spare-chip run. */
+/* Access objects: see uap.h. The layout comes from libtropic's own example. [measured 2026-10-10, spare chip] restrict-shared
+ * files rewritten to the chip made the shared key refused (exit 5) on R-MEM, ECC and the configuration, and the per-unit key
+ * still worked. */
 static chip_status_t allowed_t(const chip_t *c, const char *uap, int target, char *err)
 {
 	uint32_t w;
@@ -237,7 +270,11 @@ static chip_status_t allowed_t(const chip_t *c, const char *uap, int target, cha
 		setmsg(err, "LT_HOST_NO_SESSION");
 		return CHIP_E_SESSION;
 	}
-	w = cfg_word(c, "rconfig", uap);
+	{
+		char ap[420];
+		snprintf(ap, sizeof ap, "%s/rconfig.active", c->dir);
+		w = cfg_word(c, access(ap, F_OK) == 0 ? "rconfig.active" : "rconfig", uap);
+	}
 	/* [measured layout, from libtropic's hardware-wallet example] a byte per group of targets, one bit per pairing key,
 	 * a set bit grants access (see uap.h) */
 	if (uap_allows(w, uap_kind(uap), c->session_slot, target)) return CHIP_OK;
@@ -248,9 +285,23 @@ static chip_status_t allowed(const chip_t *c, const char *uap, char *err) { retu
 
 chip_status_t chip_chip_id(chip_t *c, chip_id_t *out, char *err)
 {
-	(void)c;
+	char sp[420], si[8] = "";
+	size_t n = 0;
 	(void)err;
 	memset(out, 0, sizeof *out);
+	snprintf(sp, sizeof sp, "%s/silicon", c->dir);
+	if (read_file(sp, (uint8_t *)si, 4, &n) == 0 && n == 4) {
+		out->chip_id_ver[0] = 1; /* CHIP_ID v1.0.0.0 as read from the spare chip */
+		memcpy(out->silicon_rev, si, 4);
+		snprintf(out->text, sizeof out->text,
+		         "CHIP_ID ver            = 0x01000000 (v1.0.0.0)\n"
+		         "Silicon rev            = 0x%02X%02X%02X%02X (%s)\n"
+		         "S/N                    = 0x00000000000000000000000000000000\n"
+		         "P/N (long)             = 0x46414B4546414B4546414B4546414B45 (FAKEFAKEFAKEFAKE)\n"
+		         "Batch ID               = 0x0000000000\n",
+		         si[0], si[1], si[2], si[3], si);
+		return CHIP_OK;
+	}
 	out->chip_id_ver[3] = 1;
 	snprintf(out->text, sizeof out->text,
 	         "CHIP_ID ver            = 0x00000001 (v0.0.0.1)\n"
@@ -648,6 +699,17 @@ chip_status_t chip_rconfig_rewrite(chip_t *c, const uint32_t words[CHIP_CONFIG_O
 	chip_status_t st = allowed(c, "TR01_CFG_UAP_R_CONFIG_WRITE_ERASE", err);
 	*stage = 0;
 	if (st) return st;
+	/* [measured on the model and on a spare chip, 2026-10-10] the chip enforces the R-config it loaded at start-up: keep it until a reboot */
+	{
+		char ap[420], rp[420];
+		snprintf(ap, sizeof ap, "%s/rconfig.active", c->dir);
+		snprintf(rp, sizeof rp, "%s/rconfig", c->dir);
+		if (access(ap, F_OK) != 0) {
+			uint8_t buf[4096];
+			size_t n = 0;
+			if (read_file(rp, buf, sizeof buf, &n) == 0) write_file(ap, buf, n);
+		}
+	}
 	/* erase first, always: this is the only place that writes the R-config */
 	for (int i = 0; i < CHIP_CONFIG_OBJ_CNT; i++) defaults[i] = i == 0 ? 0xffffffefu : 0xffffffffu;
 	write_cfg(c, "rconfig", defaults);
@@ -829,5 +891,58 @@ chip_status_t chip_certs(chip_t *c, uint8_t certs[CHIP_CERTS][CHIP_CERT_MAX], si
 		len[i] = 0;
 		if (read_file(p, certs[i], CHIP_CERT_MAX, &len[i]) != 0) len[i] = 0;
 	}
+	return CHIP_OK;
+}
+
+/* [measured on a spare chip] a restart loads the R-config into force and ends any session; mode returns to application */
+chip_status_t chip_reboot(chip_t *c, char *err)
+{
+	char p[420];
+	(void)err;
+	snprintf(p, sizeof p, "%s/rconfig.active", c->dir);
+	unlink(p);
+	c->session_slot = -1;
+	return CHIP_OK;
+}
+
+const char *chip_update_silicon(void) { return "ACAB"; }
+
+static int maint_on(const chip_t *c, const char *file) { return (cfg_word(c, file, "TR01_CFG_START_UP") & (1u << 3)) != 0; }
+
+chip_status_t chip_fw_update(chip_t *c, const uint8_t *cpu, size_t cpulen, const uint8_t cpu_ver[4], const uint8_t *spect,
+                             size_t spectlen, const uint8_t spect_ver[4], char *err)
+{
+	char p[420];
+	uint8_t cr[4], cs[4];
+	FILE *f;
+	(void)cpu;
+	(void)spect;
+	if (c->session_slot >= 0) {
+		setmsg(err, "LT_L2_UNKNOWN_REQ (a session is open)");
+		return CHIP_E_OTHER;
+	}
+	snprintf(p, sizeof p, "%s/rconfig.active", c->dir);
+	if (!maint_on(c, "iconfig") || !maint_on(c, access(p, F_OK) == 0 ? "rconfig.active" : "rconfig")) {
+		setmsg(err, "LT_L2_RESP_DISABLED (Maintenance Mode is not enabled)");
+		return CHIP_E_OTHER;
+	}
+	if (cpulen == 0 || spectlen == 0 || getenv("TROPICCTL_FAKE_FWUPDATE_FAIL")) {
+		setmsg(err, "LT_L2_CHIP_BUSY (the fake update failed)");
+		return CHIP_E_OTHER;
+	}
+	if (chip_fw_versions(c, cr, cs, err) != CHIP_OK) return CHIP_E_OTHER;
+	if (cpu_ver[3] < cr[3] || (cpu_ver[3] == cr[3] && (cpu_ver[2] < cr[2] || (cpu_ver[2] == cr[2] && cpu_ver[1] < cr[1])))) {
+		setmsg(err, "LT_L2_GEN_ERR (a chip does not accept an older firmware)");
+		return CHIP_E_OTHER;
+	}
+	if (getenv("TROPICCTL_FAKE_FWUPDATE_SILENT")) return CHIP_OK;
+	snprintf(p, sizeof p, "%s/fw", c->dir);
+	f = fopen(p, "w");
+	if (!f) {
+		setmsg(err, "fake chip cannot store the firmware version");
+		return CHIP_E_OTHER;
+	}
+	fprintf(f, "%02x%02x%02x%02x %02x%02x%02x%02x\n", cpu_ver[0], cpu_ver[1], cpu_ver[2], cpu_ver[3], spect_ver[0], spect_ver[1], spect_ver[2], spect_ver[3]);
+	fclose(f);
 	return CHIP_OK;
 }

@@ -139,7 +139,12 @@ int ctx_session(ctx_t *x)
 	rc = keys_select(x->key_source, &x->key, x->key_desc, sizeof x->key_desc);
 	if (rc) return rc;
 	st = chip_session(x->chip, &x->key, err);
-	if (st != CHIP_OK) return out_chip_error(st, "secure session failed", err);
+	if (st != CHIP_OK) {
+		rc = out_chip_error(st, "secure session failed", err);
+		if (st == CHIP_E_SESSION && (!x->key_source || strcmp(x->key_source, "shared") == 0 || strcmp(x->key_source, "es01") == 0 || strcmp(x->key_source, "auto") == 0) && x->key.slot == 0)
+			out_notice("hint: a chip with production provisioning uses the prod0 slot-0 key; try --key prod0");
+		return rc;
+	}
 	x->have_session = 1;
 	return TC_OK;
 }

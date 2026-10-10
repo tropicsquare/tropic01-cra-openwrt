@@ -246,5 +246,7 @@ check_contains "and say 'unusable'" "unusable" "$(cat err.txt)"
 
 # shellcheck source=cases_phase2.sh
 . "$HERE/cases_phase2.sh"
+# shellcheck source=cases_fw.sh
+. "$HERE/cases_fw.sh"
 
 finish

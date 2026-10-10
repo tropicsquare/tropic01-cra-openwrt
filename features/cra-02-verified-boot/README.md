@@ -16,8 +16,10 @@ TROPIC01 is **not the boot root of trust.** The SoC's BootROM verifies the first
 against keys in the SoC's own eFuses; the chip is never consulted at that point. Its possible
 role is secondary: a **monotonic counter** to make rollback protection hardware-backed (the
 installed firmware version can only go up), and a place to keep a signing or anchor value. Both
-are design options, not implemented, and the chip's counters cannot be reset, so the design
-needs care before anyone runs it on a real unit.
+are design options, not implemented. A counter only counts down, but `counter init` can be run again on the chip
+(measured on a spare chip: a counter at 0 was set back to 9), so rollback protection holds only if no pairing key that
+an attacker can obtain keeps the right to initialise counters (the `MCOUNTER_INIT` access object). The design needs
+care before anyone runs it on a real unit.
 
 ## Goal
 

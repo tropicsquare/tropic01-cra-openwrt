@@ -64,6 +64,11 @@ int cmd_counter_get(ctx_t *x, args_t *a);
 int cmd_counter_init(ctx_t *x, args_t *a);
 int cmd_counter_update(ctx_t *x, args_t *a);
 
+int cmd_chip_reboot(ctx_t *x, args_t *a);
+int cmd_fw_status(ctx_t *x, args_t *a);
+int cmd_fw_update(ctx_t *x, args_t *a);
+int cmd_fw_maintenance(ctx_t *x, args_t *a);
+
 /* help, version */
 int cmd_help(int argc, char **argv);
 void print_version(void);

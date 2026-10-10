@@ -6,6 +6,26 @@
 #include "output.h"
 
 const cmd_t g_cmds[] = {
+    /* chip, fw */
+    {"chip", "reboot", 'W', "", "Restart the chip",
+     "Restarts the chip so that a rewritten R-config is loaded. The chip loads its R-config at start-up: after config rewrite "
+     "or config restore the new access rights are not in force until this (or a power cycle). Ends any session; no key needed.",
+     cmd_chip_reboot},
+    {"fw", "status", 'R', "", "Firmware versions, silicon revision and mode",
+     "Prints the RISC-V and SPECT firmware versions, the chip's silicon revision, whether this build's update images fit it, "
+     "and the chip mode. No secure session is needed.",
+     cmd_fw_status},
+    {"fw", "update", 'I', "(--dir DIR | --cpu FILE --spect FILE) --yes-update-firmware [--enable-maintenance] [--disable-maintenance] [--backup FILE]", "Update the mutable firmware (both banks)",
+     "IRREVERSIBLE: a chip never accepts an older version, and an interrupted or wrong update can leave it unusable. Takes the "
+     "signed images as libtropic ships them (TROPIC01_fw_update_files/boot_v_X/fw_v_X_Y_Z; the versions are read from the "
+     "file names). Refuses images for another silicon revision, a downgrade, and a chip whose I-config has Maintenance Mode "
+     "disabled. --enable-maintenance enables it in the R-config first (backup, erase, write, restart); --disable-maintenance "
+     "turns it off again after the update has been read back. Run it from a stable power supply and do not interrupt it.",
+     cmd_fw_update},
+    {"fw", "maintenance", 'H', "<on|off> --yes-rewrite-r-config [--backup FILE]", "Turn Maintenance Mode on or off in the R-config",
+     "Rewrites the R-config START_UP object (backup, erase, write, read back, restart). Maintenance Mode is what a firmware "
+     "update needs; leaving it on enlarges the attack surface.",
+     cmd_fw_maintenance},
     /* info */
     {"info", "chip", 'R', "", "Print the chip identification",
      "Reads CHIP_ID. No secure session is needed. The text is the layout `lt-util -i` printed; with --json every CHIP_ID "

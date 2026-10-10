@@ -178,3 +178,28 @@ after every such write essential, and it is far behind the 2.2.0 update files li
 itself a risky step and has not been considered. Consequences: `tropicctl config burn` (which requires 2.0.0 or newer)
 refuses on this chip, as intended; the first version of that gate looked at the wrong byte and would have allowed it. That
 is fixed and has a regression test. Any statement elsewhere that the bench chip has firmware 2.1.0 is wrong.
+
+## Spare chip: firmware update and the commands that write (2026-10-10)
+
+A second TROPIC01 (P/N TR01-C2P-T101, silicon ACAB, CHIP_ID v1.0.0.0), used only for tests that cannot be undone. All
+commands are `tropicctl` built from the feed, run on the router over SSH.
+
+| Check | Result |
+|---|---|
+| First look | RISC-V 0.3.1, SPECT 0.3.1, application mode, Maintenance Mode enabled in the I-config and the R-config. The shared engineering key (ES01) is **refused** (`LT_CRYPTO_ERR`): this chip has production provisioning, and **`--key prod0`** (the production slot-0 key published with libtropic) opens a session. Pairing: slot 0 populated, 1 to 3 empty. |
+| Firmware update | `fw update --dir fw_v_2_2_0` (libtropic 4.2, `boot_v_2_0_1`): the chip reports **RISC-V 2.2.0, SPECT 1.3.0** afterwards; session, pairing list, random numbers and config reads work. |
+| `fw maintenance off` | R-config START_UP `0xffffffff` to `0xfffffff7`, backup saved, read back, chip restarted. |
+| ECC | generate P-256 and Ed25519, sign: **OpenSSL verifies both**; generating an occupied slot refused (exit 7); `ecc store` of P-256 and Ed25519 keys made with OpenSSL: **the chip's public keys equal OpenSSL's**; erase; sign with an erased slot: exit 6. |
+| R-MEM | write, read back and `--replace` of 444 and 475 bytes (the larger slot of libtropic 4.2); occupied slot refused (exit 7); erase; read of an erased slot exit 6. |
+| Pairing | `pairing write 1` with a per-unit X25519 key (**one way**): read back correctly, session with the new key opens, a second write is refused. |
+| **R-config takes effect only after a restart** | `config restrict-shared --unit-slot 1`, `config rewrite` (21 objects, backup first) read back correctly. **Before `chip reboot` the shared key still read R-MEM**; after it, the shared key got exit 5 on R-MEM, config and ECC while the unit key worked. `config restore`, `chip reboot`: the shared key has its rights again. |
+| MAC-and-Destroy | `mnd setup` (3 attempts), the right PIN releases the same key each time, a wrong PIN exit 8 ("2 attempt(s) left") and the right PIN still works after it, three wrong PINs leave no attempts and the right PIN is then refused (exit 9). |
+| Counters | uninitialised: exit 6; init 3, three updates reach 0, a fourth is refused by the tool before the chip is asked; 4294967294 accepted; **init can be repeated** (counter 5 went from 0 to 9). |
+| I-config burn | `config burn UAP_PING 31` on firmware 2.2.0: cleared and read back (I-config `0x7fffffff`). |
+
+Not run: `--key pin` on a chip, `pairing invalidate`, the chip's own error for an update at zero (the tool refuses first),
+host-state rollback of the PIN counter on a chip (the model confirmed it). State left on the spare chip: pairing slot 1
+holds a test key, MAC-and-Destroy slots 0 to 2 are used, counters 5 and 6 are initialised, I-config UAP_PING bit 31 is 0.
+
+Consequences for the project: the claim that counters "cannot be reset" was wrong and is corrected in cra-02; an access
+rights change needs `chip reboot` before it protects anything; chips with production provisioning need `--key prod0`.

@@ -31,6 +31,9 @@ tropicctl config rewrite --in r.cfg --yes-rewrite-r-config         # backup, era
 tropicctl --pin-file pin.txt mnd setup --state pin.state --out k.bin --yes-setup-mnd   # a PIN with a chip-enforced limit
 tropicctl --key pin session test            # a session with the PIN-protected pairing key
 tropicctl counter get 0                     # monotonic counters
+tropicctl fw status                         # firmware versions, silicon revision, mode
+tropicctl --key prod0 session test          # chips with production provisioning use the prod0 slot-0 key
+tropicctl chip reboot                       # load a rewritten R-config (it applies only after a restart)
 tropicctl --json pairing list               # JSON for scripts
 tropicctl help mem write                    # built-in help
 ```

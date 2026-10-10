@@ -94,8 +94,8 @@ Annex I 2(f), 2(c). Design is in [cra-02's README](../../features/cra-02-verifie
   `libtropic-pkcs11` build against its source tree (OpenSSL crypto layer, Linux SPI hardware layer).
 - **3.4 Bump OpenVPN** (pinned at 2.6.12) after a hardware test. *S-M.*
 - **3.5 MAC-and-Destroy in the command-line tool.** *Done in `tropicctl` (`mnd setup|check|status|seal|unseal`, on libtropic's
-  `lt_mac_and_destroy()`), tested against the fake chip only.* Needed by 5.4. Open: run it on a spare chip; the multiple-PIN
-  and wiping-PIN extensions of the application note. *S.*
+  `lt_mac_and_destroy()`), tested against the fake chip, the TROPIC01 software model and a spare chip (2026-10-10: setup, right and wrong PIN, attempts exhausted).* Needed by 5.4. Open: the PIN-protected
+  session (`--key pin`) on a chip; the multiple-PIN and wiping-PIN extensions of the application note. *S.*
 - **3.6 `opensc` does not build** against OpenWrt's fortify headers; `pkcs11-test` covers the
   need. Low priority. *-.*
 

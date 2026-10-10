@@ -79,6 +79,21 @@ void chip_shared_key(pairing_key_t *out)
 	out->slot = TR01_PAIRING_KEY_SLOT_INDEX_0;
 }
 
+int chip_named_key(const char *name, pairing_key_t *out)
+{
+	if (strcmp(name, "es01") == 0) {
+		chip_shared_key(out);
+		return 1;
+	}
+	if (strcmp(name, "prod0") == 0) {
+		memcpy(out->priv, lt_sh0priv_prod0, 32);
+		memcpy(out->pub, lt_sh0pub_prod0, 32);
+		out->slot = TR01_PAIRING_KEY_SLOT_INDEX_0;
+		return 1;
+	}
+	return 0;
+}
+
 chip_status_t chip_session(chip_t *c, const pairing_key_t *key, char *err)
 {
 	return map(lt_verify_chip_and_start_secure_session(&c->h, key->priv, key->pub, (lt_pkey_index_t)key->slot), err);
@@ -293,4 +308,23 @@ chip_status_t chip_certs(chip_t *c, uint8_t certs[CHIP_CERTS][CHIP_CERT_MAX], si
 	if (st != CHIP_OK) return st;
 	for (int i = 0; i < CHIP_CERTS; i++) len[i] = store.cert_len[i];
 	return CHIP_OK;
+}
+
+chip_status_t chip_reboot(chip_t *c, char *err) { return map(lt_reboot(&c->h, TR01_REBOOT), err); }
+
+const char *chip_update_silicon(void)
+{
+#if defined(LT_SILICON_REV_ABAB)
+	return "ABAB";
+#else
+	return "ACAB";
+#endif
+}
+
+chip_status_t chip_fw_update(chip_t *c, const uint8_t *cpu, size_t cpulen, const uint8_t cpu_ver[4], const uint8_t *spect,
+                             size_t spectlen, const uint8_t spect_ver[4], char *err)
+{
+	(void)cpu_ver;
+	(void)spect_ver; /* the chip checks the images itself; the caller reads the versions back */
+	return map(lt_do_mutable_fw_update(&c->h, cpu, cpulen, spect, spectlen), err);
 }

@@ -21,7 +21,7 @@ chip\-select GPIO line (default 25)
 SPI clock (default 1000000)
 .TP
 .B \-\-key SOURCE
-pairing key: auto (default), shared, unit, file:PATH:SLOT, pin
+pairing key: auto (default), shared or es01 (engineering sample), prod0 (production), unit, file:PATH:SLOT, pin
 .TP
 .B \-\-pin\-file FILE, \-\-pin\-stdin
 where a PIN comes from (never the command line); otherwise a terminal prompt
@@ -44,6 +44,26 @@ do not take the chip lock (tests and debugging only)
 .B \-\-version, \-h
 print the version / this help
 .SH COMMANDS
+.TP
+.B chip reboot
+
+.br
+[W] Restart the chip. Restarts the chip so that a rewritten R\-config is loaded. The chip loads its R\-config at start\-up: after config rewrite or config restore the new access rights are not in force until this (or a power cycle). Ends any session; no key needed.
+.TP
+.B fw status
+
+.br
+[R] Firmware versions, silicon revision and mode. Prints the RISC\-V and SPECT firmware versions, the chip's silicon revision, whether this build's update images fit it, and the chip mode. No secure session is needed.
+.TP
+.B fw update
+(\-\-dir DIR | \-\-cpu FILE \-\-spect FILE) \-\-yes\-update\-firmware [\-\-enable\-maintenance] [\-\-disable\-maintenance] [\-\-backup FILE]
+.br
+[I] Update the mutable firmware (both banks). IRREVERSIBLE: a chip never accepts an older version, and an interrupted or wrong update can leave it unusable. Takes the signed images as libtropic ships them (TROPIC01_fw_update_files/boot_v_X/fw_v_X_Y_Z; the versions are read from the file names). Refuses images for another silicon revision, a downgrade, and a chip whose I\-config has Maintenance Mode disabled. \-\-enable\-maintenance enables it in the R\-config first (backup, erase, write, restart); \-\-disable\-maintenance turns it off again after the update has been read back. Run it from a stable power supply and do not interrupt it.
+.TP
+.B fw maintenance
+<on|off> \-\-yes\-rewrite\-r\-config [\-\-backup FILE]
+.br
+[H] Turn Maintenance Mode on or off in the R\-config. Rewrites the R\-config START_UP object (backup, erase, write, read back, restart). Maintenance Mode is what a firmware update needs; leaving it on enlarges the attack surface.
 .TP
 .B info chip
 

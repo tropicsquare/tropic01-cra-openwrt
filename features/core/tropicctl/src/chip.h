@@ -67,6 +67,9 @@ void chip_close(chip_t *c);
 
 /* The shared engineering-sample pairing key (slot 0). Public knowledge, published with libtropic. */
 void chip_shared_key(pairing_key_t *out);
+/* The two slot-0 keys libtropic publishes: "es01" (engineering sample, the same as chip_shared_key) and "prod0"
+ * (production). Returns 1 and fills out, or 0 for any other name. */
+int chip_named_key(const char *name, pairing_key_t *out);
 chip_status_t chip_session(chip_t *c, const pairing_key_t *key, char *err);
 chip_status_t chip_session_end(chip_t *c, char *err); /* abort the secure session so another key can open one */
 
@@ -125,6 +128,22 @@ chip_status_t chip_counter_get(chip_t *c, unsigned n, uint32_t *value, char *err
 chip_status_t chip_counter_update(chip_t *c, unsigned n, char *err);
 
 chip_status_t chip_mode(chip_t *c, chip_mode_t *mode, char *err);
+
+/* Restart the chip (L2 Startup_Req, REBOOT). Ends any secure session. R-config changes are loaded by the chip at start-up,
+ * so a rewritten R-config takes effect only after this (or a power cycle). No session needed. */
+chip_status_t chip_reboot(chip_t *c, char *err);
+
+/* ---- firmware update ---- */
+/* The silicon revision ("ABAB" or "ACAB") libtropic's update helper was built for. The images are different for each. */
+const char *chip_update_silicon(void);
+/*
+ * Update both mutable firmware banks with libtropic's recommended sequence (it reboots the chip into maintenance mode
+ * itself, which must be enabled in I-config and R-config). No secure session may be open. cpu_ver and spect_ver are the
+ * versions the images carry, in the byte order of chip_fw_versions; the real chip ignores them (the caller reads the
+ * versions back), the fake uses them. A chip never accepts an older version.
+ */
+chip_status_t chip_fw_update(chip_t *c, const uint8_t *cpu, size_t cpulen, const uint8_t cpu_ver[4], const uint8_t *spect,
+                             size_t spectlen, const uint8_t spect_ver[4], char *err);
 /* the chip's certificate store: up to CHIP_CERTS certificates; unused ones have length 0 */
 chip_status_t chip_certs(chip_t *c, uint8_t certs[CHIP_CERTS][CHIP_CERT_MAX], size_t len[CHIP_CERTS], char *err);
 
