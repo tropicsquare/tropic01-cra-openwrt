@@ -126,6 +126,11 @@ Annex I 2(f), 2(c). Design is in [cra-02's README](../../features/cra-02-verifie
   this feed, self-contained so it can move to its own repository; the old `lt-util` commands are kept through a
   legacy mode. Phase 0 is the review of the specification (decisions 5 to 7 in section 12 still to confirm). Supersedes new work on the old tool (3.5, 3.8, and the write side
   of 4.7 would be built in the new one). *L.*
+- **3.14 R-MEM slot 0 reads back identical to slot 1 on the bench chip** (found by the tropicctl read-only run,
+  2026-10-10), while the documentation says slot 0 is read-protected on the ES silicon. Find out whether slot 0 was
+  also written at some point or whether reads of slot 0 are aliased to slot 1, then correct the documentation (the
+  core README, the pkcs11 skill and the cra-03 guide say "slot 0 is read-protected, certificates go in slot N+1").
+  A spare chip: write a distinct value to slot 1, read slot 0. *S.*
 - **3.8 `lt-util` after the libtropic upgrade.** libtropic 4.x has **no Linux command-line tool**: its "TROPIC01 Util"
   is a Python program for the USB DevKit only, and the separate `libtropic-util` repository (our source) has no 4.x
   port. So `lt-util` stays, ported by patch 005 to libtropic 4.2.0 with the same command line. Remaining: upstream our

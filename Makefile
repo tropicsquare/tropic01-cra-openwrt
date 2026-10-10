@@ -53,6 +53,7 @@ savedefconfig:
 
 test:
 	@tests/sandbox/run-all.sh
+	@features/core/tropicctl/tests/run.sh
 
 lint:
 	@files=$$(find . -path ./build -prune -o -type f \
@@ -63,7 +64,7 @@ lint:
 	else \
 		echo "$$files" | xargs shellcheck -s sh; \
 	fi; \
-	shellcheck -s bash -x -P SCRIPTDIR tests/sandbox/*.sh
+	shellcheck -s bash -x -P SCRIPTDIR tests/sandbox/*.sh features/core/tropicctl/tests/run.sh features/core/tropicctl/tests/lib.sh
 
 docker-image:
 	docker build -t $(DOCKER_IMAGE) \

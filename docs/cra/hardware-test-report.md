@@ -122,3 +122,26 @@ Run by hand because they write and erase the chip (R-MEM slot 100 only; slot 1 s
 - **Honest limit:** a vault key in R-MEM is readable by anyone who can open a session with the chip, which today
   uses the shared engineering-sample pairing key (cra-04). The VPN's tls-crypt key (not the client private key) is
   stored as a `0600` file by design.
+
+### tropicctl phase 1, read-only run on the bench chip (2026-10-10)
+
+The new tool (`features/core/tropicctl`, aarch64 build, 88 KB) was copied to `/tmp` on the router with OpenVPN stopped,
+run, removed, and OpenVPN restarted. Only read commands were run; nothing was written to the chip.
+
+| Check | Result |
+|---|---|
+| `info chip` | the same CHIP_ID block `lt-util -i` prints (TROPIC01-ES) |
+| `info fw` | `00 02 01 00` / `00 01 03 00`, and as JSON `{"riscv_fw":"00020100","spect_fw":"00010300"}` |
+| `session test` | opens with the shared key; warns on stderr that no per-unit key exists |
+| `pairing list` | slot 0 populated, slots 1 to 3 empty (the fake's default, now **measured**) |
+| `config dump` | in legacy mode (`lt-util -x -r`) **byte-identical** to the earlier survey output |
+| `rng get 16` | 32 hex digits |
+| `mem list --range 0-10` | slots 0, 1 and 2 hold data (299, 299 and 383 bytes) |
+| exit codes | an empty slot is 6, a bad argument is 2 |
+| legacy mode | `lt-util -i`, `-x -f`, `-x -r`, `-k -r` behave like the old tool; `-k -r` on an empty slot returns 1 |
+
+**Observation to investigate (backlog 3.14):** R-MEM slot 0 reads back **identical to slot 1** (same 299 bytes, the
+certificate `CN=tropic01-client`), although the project documentation says slot 0 is read-protected on this silicon.
+Either that certificate was also stored in slot 0 at some point, or reads of slot 0 are answered with slot 1's data.
+Slot 2 holds a 383-byte self-signed certificate (`CN=openwrt-tropic01`), probably from the earlier AWS experiments.
+Nothing was written to find out; a test on a spare chip should write a distinct value to slot 1 and read slot 0.

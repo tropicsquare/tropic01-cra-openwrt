@@ -1,6 +1,6 @@
 # tropicctl: a command-line tool for TROPIC01 on Linux (specification draft)
 
-**Status: draft, decisions 1 to 4 made (section 12). No code exists yet.** This document defines what the tool does, how it behaves and how it
+**Status: all decisions made (section 12); phase 1 implemented and run read-only on the bench chip (2026-10-10).** This document defines what the tool does, how it behaves and how it
 is tested, so that the interface can be agreed before it is built. It replaces the patched `lt-util` that this feed
 carries today and is written so that it could also be used outside this project.
 
@@ -345,10 +345,10 @@ Decided by the project owner on 2026-10-10:
    inherited through legacy mode (sections 3.1 and 11).
 4. **Testing:** a hand-written fake chip plus hardware tests only (section 10).
 
-Proposed, **not yet confirmed**:
-5. **JSON output** is in version 1 (it is cheap and scripts need it).
-6. **Lock file** `/var/lock/tropicctl.lock` is the stop-gap around the chip, and the PKCS#11 module is patched to take
-   it too.
+Confirmed by the project owner on 2026-10-10 (proposals accepted):
+5. **JSON output** is in version 1.
+6. **Lock file** `/var/lock/tropicctl.lock` is the stop-gap around the chip; the PKCS#11 module is patched to take it
+   too. `--no-lock` exists for tests and debugging only.
 7. **No raw R-config write command**, even for experts.
 
 ## 13. Phases and acceptance
@@ -357,8 +357,8 @@ Version 1.0 contains every area; the phases only order the work. Each phase ends
 
 | Phase | Deliverable | Done when |
 |---|---|---|
-| 0 | this specification reviewed; decisions 5 to 7 confirmed | recorded in section 12 |
-| 1 | skeleton: chip interface and fake, option parsing, command table, session, lock, output, exit codes; `info`, `rng`, `mem`, `pairing list/read`, `config dump`; **legacy mode for the read-only and R-MEM commands**; generated help and manual page; unit and fake-chip tests | builds in the feed; the bench read-only checks pass against the real chip |
+| 0 | this specification reviewed; decisions 1 to 7 made | recorded in section 12 (done) |
+| 1 | **done**: skeleton: chip interface and fake, option parsing, command table, session, lock, output, exit codes; `info`, `rng`, `mem`, `pairing list/read`, `config dump`, `session test`; **legacy mode for the read-only and R-MEM commands**; generated help and manual page; 138 unit and fake-chip tests | builds in the feed; the bench read-only checks pass against the real chip (hardware report) |
 | 2 | `ecc`, `pairing write/invalidate`, `config rewrite/restore/diff/burn`; the rest of legacy mode; guard-breaking tests | fake-chip suite passes; spare-chip run documented |
 | 3 | callers migrated; `lt-util` patches retired | the full hardware suite (56 checks) and an OpenVPN tunnel pass on the new tool |
 | 4 | `mnd`, `counter`; PIN-protected sessions (`--key pin`) for cra-04 tier 1 | spare-chip run documented; counter semantics confirmed from the datasheet first |

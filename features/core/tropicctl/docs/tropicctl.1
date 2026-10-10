@@ -1,0 +1,132 @@
+.TH TROPICCTL 1 "" "tropicctl 0.1.0" "User Commands"
+.SH NAME
+tropicctl \- command-line tool for the TROPIC01 secure element
+.SH SYNOPSIS
+.B tropicctl
+[global options] <area> <verb> [arguments]
+.SH DESCRIPTION
+Generated from the command table; see also the reference in the source tree.
+.SH GLOBAL OPTIONS
+.TP
+.B \-\-spi\-dev PATH
+SPI device (default /dev/spidev2.0, or $TROPICCTL_SPI_DEV)
+.TP
+.B \-\-gpio\-dev PATH
+GPIO chip (default /dev/gpiochip0)
+.TP
+.B \-\-cs\-pin N
+chip\-select GPIO line (default 25)
+.TP
+.B \-\-spi\-speed HZ
+SPI clock (default 1000000)
+.TP
+.B \-\-key SOURCE
+pairing key: auto (default), shared, unit, file:PATH:SLOT
+.TP
+.B \-\-json
+machine\-readable output on stdout; errors as a JSON object on stderr
+.TP
+.B \-q, \-v
+quiet / verbose notices on stderr
+.TP
+.B \-\-lock\-timeout SEC
+how long to wait for the chip lock (default 10)
+.TP
+.B \-\-dry\-run
+check everything read\-only, say what would be written, write nothing
+.TP
+.B \-\-no\-lock
+do not take the chip lock (tests and debugging only)
+.TP
+.B \-\-version, \-h
+print the version / this help
+.SH COMMANDS
+.TP
+.B info chip
+
+.br
+[R] Print the chip identification. Reads CHIP_ID. No secure session is needed. The text is the layout `lt\-util \-i` printed; with \-\-json every CHIP_ID group is a hex string, as libtropic defines the groups, without interpretation.
+.TP
+.B info fw
+
+.br
+[R] Print the RISC\-V and SPECT firmware version bytes. Prints the version bytes as the chip reports them. No secure session is needed.
+.TP
+.B rng get
+<count> [\-\-out FILE|\-] [\-\-hex]
+.br
+[R] Random bytes from the chip (1 to 255). Without \-\-out the bytes are printed as hex. With \-\-out FILE (or \- for stdout) they are written raw. Needs a secure session.
+.TP
+.B mem list
+[\-\-range A\-B]
+.br
+[R] Which R\-MEM slots hold data, and how much. Reads each slot in the range (default 0\-511; every slot is one chip command, so the full range takes a while) and lists the populated ones.
+.TP
+.B mem read
+<slot> [\-\-out FILE|\-]
+.br
+[R] Read an R\-MEM slot (0\-511). Without \-\-out the content is printed as hex; with \-\-out it is written raw. An empty slot is exit code 6.
+.TP
+.B mem write
+<slot> \-\-in FILE|\- [\-\-replace]
+.br
+[W] Write an R\-MEM slot (1 to 475 bytes). Refuses an occupied slot unless \-\-replace is given (then the slot is erased first). The slot is read back and compared; a mismatch is exit code 8. With \-\-dry\-run nothing is written.
+.TP
+.B mem erase
+<slot>
+.br
+[W] Erase an R\-MEM slot. Erases the slot and checks that it reads empty. Erasing an empty slot is not an error. With \-\-dry\-run nothing is written.
+.TP
+.B pairing list
+
+.br
+[R] State of the four pairing slots. Each slot is populated, empty or invalidated. Reading the slots needs a session; with the shared key this works unless the chip's access rights say otherwise.
+.TP
+.B pairing read
+<slot> [\-\-out FILE]
+.br
+[R] Read the public pairing key of a slot (0\-3). Prints the 32\-byte public key as hex, or writes it raw with \-\-out. An empty or invalidated slot is exit code 6.
+.TP
+.B config dump
+
+.br
+[R] Every R\-config and I\-config object as raw words. Prints "R NAME 0xVALUE" lines for the reconfigurable objects and "I NAME 0xVALUE" lines for the one\-way objects. Read\-only.
+.TP
+.B session test
+
+.br
+[R] Open and close a secure session; say which key was used. Reports the pairing key and slot that opened the session. Exit code 4 if no key works.
+.SH EXIT STATUS
+.TP
+.B 0
+success
+.TP
+.B 1
+internal error (a bug)
+.TP
+.B 2
+usage error (bad arguments)
+.TP
+.B 3
+chip unreachable or busy (SPI, GPIO, lock timeout)
+.TP
+.B 4
+secure session failed (no usable pairing key, key refused)
+.TP
+.B 5
+access denied by the chip's access rights
+.TP
+.B 6
+slot empty or object not found
+.TP
+.B 7
+slot already written
+.TP
+.B 8
+verification failed (read\-back mismatch)
+.TP
+.B 9
+refused by a safety rule (missing confirmation flag, forbidden target)
+.TP
+.B 10
+the chip reported another error
