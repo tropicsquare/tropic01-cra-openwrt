@@ -110,6 +110,26 @@ Annex I 2(f), 2(c). Design is in [cra-02's README](../../features/cra-02-verifie
   logs errors only. Still open: `libtropic-pkcs11` writes every call (including key handles) to syslog at debug level
   (`006-add-syslog-tracing.patch`). Both are useful while bringing up hardware, and both are unwanted on a unit whose
   `logread` anyone on the network can read. Make them build-time options, off in release images. *S.*
+- **3.11 Evaluate a native OpenSSL provider for TROPIC01** (instead of going through PKCS#11, as the TPM world's
+  `tpm2-openssl` does). Today OpenSSL reaches the chip through the generic `pkcs11-provider` and the
+  `libtropic_pkcs11.so` module, and OpenVPN through `pkcs11-helper`. A native provider would need no change to
+  OpenSSL (it is a separate loadable module) and would cover only what the chip does: P-256 ECDSA and Ed25519
+  signing, key and certificate lookup by URI, perhaps random numbers; key exchange and bulk crypto stay in software.
+  **Not recommended now:** PKCS#11 is the standard interface for this chip and Tropic Square already maintains the
+  module; a provider is new security-critical code for us to write, review and list in the SBOM; and it does not
+  remove the single-session limit (3.12). Revisit if the PKCS#11 layer keeps costing patches (it takes 3 on
+  `pkcs11-provider` and 7 on the module today), if a consumer we want (for example strongSwan or a web server)
+  only supports OpenSSL providers, or if OpenSSL should draw on the chip's random numbers (a kernel hardware-RNG
+  driver is the cleaner route for that). **Cheap first experiment:** drop `pkcs11-helper` and let OpenVPN load
+  `pkcs11-provider` through its `providers` option: fewer packages, still PKCS#11. *Experiment S, provider L.*
+- **3.12 One owner for the chip's single SPI session.** TROPIC01 allows one secure session at a time, so whoever
+  has it (a running OpenVPN, the vault at boot, `lt-util`, a CSR) blocks everyone else, and the repo works around
+  it with ordering: the vault unlocks at S45 before OpenVPN takes the session at S90, and the tools stop OpenVPN
+  first. A small broker daemon that holds the session and serialises requests (sign, read R-MEM, vault key) would
+  remove that coupling and is the prerequisite for using the chip from more than one service, for example log
+  anchoring (6.3) next to a running VPN. Design questions: the local interface and who may call it, how it behaves
+  while the chip is busy or absent (fail closed), and how it fits the PKCS#11 module, which today opens its own
+  session. *L.*
 - **3.7 Upgrade libtropic.** *Done to v4.2.0 (not 4.1: 4.2 raises the R-MEM read buffer from 444 to 475 bytes).*
   Verified on an OpenWrt One: chip identification, the secure session with the shared key, R-MEM read,
   pairing-slot inspection and the per-unit-key refusal rules (`bench.py cra04`, 13 of 13), and a certificate
