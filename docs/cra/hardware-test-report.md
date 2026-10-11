@@ -217,3 +217,20 @@ rights change needs `chip reboot` before it protects anything; chips with produc
 Lesson: a restriction file that removes `UAP_I_CONFIG_READ` from the key that has to undo it can lock that key out of
 the restore path (with the old build). Test the undo before relying on a restriction. State left on the spare chip:
 pairing slots 1 and 2 hold test keys whose private halves were deleted, MAC-and-Destroy slots 20 to 22 are used.
+
+## Clean rebuild and flash, old bench chip (2026-10-11)
+
+Image built from a fresh clone of `docs/tropicctl-spec` at `3fad9f9` in the Docker builder with an **empty download
+cache** (123 sources, no hash mismatch, exit 0, no errors); flashed with `sysupgrade` keeping settings; the bench chip
+(RISC-V 0.1.2, SPECT 0.3.1, silicon ABAB, ES01 key) was in the router. OpenVPN was stopped and checked by process ID
+before every chip command.
+
+| Check | Result |
+|---|---|
+| Image | `tropicctl` 0.1.0, `libtropic` 4.2.0, `libtropic-pkcs11` r2, `lt-util` is a symlink to `tropicctl`; `lt-util -i` and `-x -f` work in legacy mode |
+| Read-only `tropicctl` | `fw status`, session with the shared key, `pairing list` (slot 0 only), `rng get`, `mem list` (slots 0 to 2: 299, 299, 383 bytes), `ecc list` (4 keys), `config dump` (54 lines), `info cert` (4), `counter get 0` exit 6, `config burn` refused (firmware older than 2.0.0), `chip reboot` |
+| Vault | init (key in R-MEM slot 100, no plaintext in the image), lock, unlock, `destroy` without its flag refused, `destroy` erased slot 100 and deleted the image, **the old image put back was refused** |
+| OpenVPN with the key in the chip | the module lists the two certificates; the tunnel came up (`tun0` 10.8.0.2), the log shows "signature complete: 64 bytes produced by TROPIC01 hardware", the process holds `/dev/spidev2.0` and `/dev/gpiochip0`, 4 of 4 pings to the gateway (about 6.8 ms); the config has only `pkcs11-providers` and `pkcs11-id` (no `key`, no `cert`) |
+| Found: `sysupgrade` keeps settings but not `/etc/tropic01/` | the keep list has the OpenVPN files and the feature configs, but not the key directory: a vault image, a per-unit pairing key or the `slot0-key` setting does not survive an upgrade (the per-unit key would then lock the unit out of its own chip). Open: a keep.d entry and a note that backups then contain the pairing key. |
+
+Not run here: the console-driven `bench.py suite` (the serial console was silent); the same checks were done over SSH.
