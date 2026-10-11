@@ -92,6 +92,12 @@ changes the configuration, `make DL_DIR=~/openwrt-dl` shares a download cache, `
 run the checks that need no board. Never edit `build/openwrt` by hand: it is regenerated from this repository
 ([how it is organised](#how-the-repository-is-organised)).
 
+**Signed images (cra-07).** `make build TROPIC01_SIGNING_DIR=<dir> TROPIC01_IMAGE_SV=<n>` signs the image with the release
+key in `<dir>` (`key-build`, `key-build.ucert`, made by
+`features/cra-07-secure-update/host-tools/tropic01-update-keys.sh`, kept outside any repository) and stamps it with security
+version `<n>`. Without these variables the image is unsigned, as before. See
+[cra-07-secure-update](features/cra-07-secure-update/).
+
 ## 2. Flash
 
 From a unit that already runs OpenWrt (SSH or the serial console):

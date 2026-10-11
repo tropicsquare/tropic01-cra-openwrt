@@ -10,6 +10,9 @@
 #      feeds, then update + install them
 #   4. assemble .config from configs/openwrt-one.config plus every
 #      features/*/openwrt.config fragment, and expand it with defconfig
+#   5. image signing (cra-07), only when asked: TROPIC01_SIGNING_DIR holds
+#      key-build and key-build.ucert (outside any git work tree), and
+#      TROPIC01_IMAGE_SV is the image's security version
 #
 # $OPENWRT_DIR is generated state. Local edits to tracked files in it are
 # discarded whenever the patch set changes -- work in this repo instead.
@@ -128,9 +131,53 @@ write_config() {
 	(cd "$OPENWRT_DIR" && make defconfig >/dev/null)
 }
 
+# cra-07: OpenWrt's append-metadata signs every image when $OPENWRT_DIR/key-build and key-build.ucert exist, and patch
+# 0003 puts TROPIC01_IMAGE_SV into the signed metadata. The same value goes into the root filesystem, where the router
+# reads the running image's security version. Both are optional. Whatever a previous run placed is removed first, so a
+# build without them is really unsigned and carries no security version.
+setup_update_signing() {
+	marker="$OPENWRT_DIR/.tropic01-signing"
+	sv_file="$OPENWRT_DIR/files/usr/share/tropic01/image-sv"
+	if [ -e "$OPENWRT_DIR/key-build" ] && [ ! -e "$marker" ]; then
+		die "$OPENWRT_DIR/key-build exists but was not placed by this harness; remove it or move it to TROPIC01_SIGNING_DIR"
+	fi
+	rm -f "$OPENWRT_DIR/key-build" "$OPENWRT_DIR/key-build.ucert" "$marker" "$sv_file"
+
+	if [ -n "${TROPIC01_SIGNING_DIR:-}" ]; then
+		d="$TROPIC01_SIGNING_DIR"
+		[ -d "$d" ] || die "TROPIC01_SIGNING_DIR=$d is not a directory"
+		if git -C "$d" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+			die "TROPIC01_SIGNING_DIR=$d is inside a git work tree; keep signing keys outside any repository"
+		fi
+		[ -s "$d/key-build" ] && [ -s "$d/key-build.ucert" ] ||
+			die "TROPIC01_SIGNING_DIR=$d must hold key-build and key-build.ucert (make them with features/cra-07-secure-update/host-tools/tropic01-update-keys.sh)"
+		touch "$marker"
+		install -m 600 "$d/key-build" "$OPENWRT_DIR/key-build"
+		install -m 644 "$d/key-build.ucert" "$OPENWRT_DIR/key-build.ucert"
+		log "image signing: on (release key and certificate from $d)"
+	else
+		log "image signing: off (TROPIC01_SIGNING_DIR not set): the image is unsigned"
+	fi
+
+	if [ -n "${TROPIC01_IMAGE_SV:-}" ]; then
+		case "$TROPIC01_IMAGE_SV" in *[!0-9]*) die "TROPIC01_IMAGE_SV must be a whole number (got '$TROPIC01_IMAGE_SV')" ;; esac
+		[ "$TROPIC01_IMAGE_SV" -ge 1 ] && [ "$TROPIC01_IMAGE_SV" -le 4294967294 ] ||
+			die "TROPIC01_IMAGE_SV must be 1 to 4294967294"
+		mkdir -p "$(dirname "$sv_file")"
+		echo "$TROPIC01_IMAGE_SV" > "$sv_file"
+		log "image security version: $TROPIC01_IMAGE_SV (signed metadata and /usr/share/tropic01/image-sv)"
+	fi
+	if [ -n "${TROPIC01_SIGNING_DIR:-}" ] && [ -z "${TROPIC01_IMAGE_SV:-}" ]; then
+		log "WARNING: signed but without TROPIC01_IMAGE_SV: a router running cra-07 refuses an image without a security version"
+	elif [ -z "${TROPIC01_SIGNING_DIR:-}" ] && [ -n "${TROPIC01_IMAGE_SV:-}" ]; then
+		log "WARNING: a security version but no signing: a router running cra-07 refuses an unsigned image"
+	fi
+}
+
 checkout_openwrt
 apply_patches
 setup_dl_dir
 setup_feeds
 write_config
+setup_update_signing
 log "ready: $OPENWRT_DIR"

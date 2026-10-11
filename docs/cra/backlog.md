@@ -293,10 +293,10 @@ destroy). Only `/vault` is encrypted.
 Annex I 2(c), 2(f) for the update path. Design: [cra-07 design](../../features/cra-07-secure-update/docs/design.md).
 
 - **10.1 Router side.** *Done in the sandbox:* `tropic01-update` and the sysupgrade hook (signature chain to a root key in
-  R-MEM, security version against the counter floor, refusal not forceable, commit at boot); 58 checks. *S.*
-- **10.2 Build side.** An OpenWrt patch that puts `tropic01_sv` into the image metadata, the harness step that places
-  `key-build` and `key-build.ucert` (never committed), the running image's security version in the root filesystem, and a
-  host tool for the root key and release certificates. *M.*
+  R-MEM, security version against the counter floor, refusal not forceable, commit at boot); 66 checks with 10.2. *S.*
+- **10.2 Build side.** *Done:* OpenWrt patch 0003 (`tropic01_sv` in the signed metadata), the harness step
+  (`TROPIC01_SIGNING_DIR`, `TROPIC01_IMAGE_SV`; nothing left behind when unset), the running image's security version in the
+  root filesystem, and the host tool `tropic01-update-keys.sh`. Docker builds do not pass the signing directory in yet. *M.*
 - **10.3 Spare chip.** Root key in R-MEM, counter initialised (**irreversible range**), signed image accepted, tampered,
   foreign and older images refused, commit after boot. *S.*
 - **10.4 Certificate validity and the clock.** `ucert` certificates expire (one year by default); the router's clock is wrong

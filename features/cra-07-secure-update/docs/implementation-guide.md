@@ -51,7 +51,11 @@ file is the work plan.
 - **Related, done elsewhere:** `/etc/tropic01/` is on the sysupgrade keep list (`features/core/tropicctl/files/keep.d`, on the
   cra-04 branch `feat/cra-04-pairing-provisioning`, commit `b706fca`, not on this branch). The pending-free commit design
   below does not need it, but provisioning files in `/etc/tropic01/` do.
-- **Not started:** milestones 2 to 5 below.
+- **Done (milestone 2):** OpenWrt patch `0003`, the harness step in `scripts/prepare.sh` (`TROPIC01_SIGNING_DIR`,
+  `TROPIC01_IMAGE_SV`), `host-tools/tropic01-update-keys.sh`, sandbox checks for both (66 in total). Verified with a real build:
+  signed image with `tropic01_sv` 1 accepted by `ucert -V` against the root; a build without the variables is unsigned and
+  leaves no key or security version behind.
+- **Not started:** milestones 3 to 5 below.
 
 ## 3. Design in one page
 
@@ -111,7 +115,7 @@ slot or uninitialised counter, 7 slot occupied, 9 refused by a safety gate, 10 c
 - **A package that is not selected is not compiled** by `make package PKG=...` ("Nothing to be done"). To test the Makefile
   without putting it in the image, select it as a module in the generated tree only (`CONFIG_PACKAGE_...=m`, `make defconfig`).
 
-## 5. Milestone 2: the build side (next)
+## 5. Milestone 2: the build side (done; kept as the reference for how it works)
 
 Goal: `make build` with a signing directory and a security version produces an image that the milestone-1 check accepts,
 and without them produces exactly what it produces today.
@@ -169,7 +173,7 @@ Never print a secret key; refuse a DIR inside a git work tree; refuse to overwri
   - a build **without** the variables is unsigned and has no `image-sv` (no leakage).
 - `make lint`, `make test`, `scripts/check-doc-links.py`, the gitleaks scan: all clean.
 
-## 6. Milestone 3: spare chip (needs the user, step by step)
+## 6. Milestone 3: spare chip (next; needs the user, step by step)
 
 Only on the **spare chip** (S/N 0x02001101085B1905090D000000000358, firmware 2.2.0, production slot-0 key: put `prod0` in the
 key directory's `slot0-key` or pass `--key prod0`). Write one script per phase, the user runs it, you read the log. Each

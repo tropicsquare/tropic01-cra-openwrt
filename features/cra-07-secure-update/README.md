@@ -1,13 +1,13 @@
 # cra-07-secure-update — signed updates and rollback protection
 
-**CRA Annex I, Part I, 2(c) and 2(f), for the update path. Status: in progress (sandbox-tested, not yet on a router).**
+**CRA Annex I, Part I, 2(c) and 2(f), for the update path. Status: in progress (router side and build side done and tested in the sandbox and a real build; not yet on a router).**
 
 ## At a glance
 
 | | |
 |---|---|
 | Requirement | 2(c): security updates; 2(f): integrity of the software, here at the moment it is installed |
-| Status | in progress: router-side check and sandbox tests; build signing and a chip run still to do |
+| Status | in progress: router-side check, build signing and the host key tool done; the chip run is still to do |
 | Irreversible step | initialising the rollback counter fixes its range; burning the counter-init right away (optional) |
 | Not this feature | secure boot (the SoC and U-Boot checking what they boot): [cra-02-verified-boot](../cra-02-verified-boot/) |
 
@@ -46,8 +46,21 @@ Commands: `tropic01-update status | check IMAGE | commit | keys install SLOT FIL
 - Certificate validity windows and a wrong clock before NTP can refuse good images: see the design, section 4.
 - Nothing is provisioned yet, and the package is not in the default image (`openwrt.config` leaves it commented out).
 
+## Building a signed image
+
+1. Once, offline: `host-tools/tropic01-update-keys.sh new-root /secure/update-root` (the root key; `root.pub` goes into each
+   unit's TROPIC01, `root.sec` never leaves the operator).
+2. Per release key: `host-tools/tropic01-update-keys.sh issue /secure/update-root /secure/signing` (`key-build`, its certificate
+   from the root, and a revoker certificate).
+3. Per build: `make build TROPIC01_SIGNING_DIR=/secure/signing TROPIC01_IMAGE_SV=<n>`. OpenWrt's `append-metadata` signs the
+   image; patch `0003` puts `"tropic01_sv": n` into the signed metadata and `/usr/share/tropic01/image-sv` into the root
+   filesystem. Raise `n` only when a release must not be rolled back past.
+
+Both directories must be outside any git work tree (the tools refuse otherwise).
+
 ## Tests
 
-`tests/sandbox/secure-update.sh` (58 checks, mutation-checked) runs the tool with OpenWrt's `usign`, `ucert` and `fwtool`
+`tests/sandbox/secure-update.sh` (66 checks, mutation-checked; includes keys from the host tool and an image signed exactly as
+`append-metadata` does) runs the tool with OpenWrt's `usign`, `ucert` and `fwtool`
 and the real `tropicctl` on its fake chip. It needs those host tools from an OpenWrt build tree (`OPENWRT_DIR`) and skips
 without them.

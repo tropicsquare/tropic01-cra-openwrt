@@ -144,6 +144,29 @@ check "a refused image also starts OpenVPN again" 1 "$(run check foreign)"
 check "stop and start" "stop start" "$(tr '\n' ' ' < ovpn.log | sed 's/ $//')"
 rm -f ovpn.running
 
+echo "# keys from the host tool, image signed exactly as OpenWrt's append-metadata does"
+H="$REPO/features/cra-07-secure-update/host-tools/tropic01-update-keys.sh"
+check "host tool: new root" 0 "$("$H" new-root "$WORK/ops/root" >/dev/null 2>&1; echo $?)"
+check "host tool: issue a release key" 0 "$("$H" issue "$WORK/ops/root" "$WORK/ops/sign" >/dev/null 2>&1; echo $?)"
+check "host tool: never overwrites a key" 1 "$("$H" new-root "$WORK/ops/root" >/dev/null 2>&1; echo $?)"
+check "host tool: refuses a directory inside a git work tree" 1 "$("$H" new-root "$REPO/features/not-a-key-dir" >/dev/null 2>&1; echo $?)"
+check "and creates nothing there" "no" "$([ -e "$REPO/features/not-a-key-dir" ] && echo yes || echo no)"
+newchip
+"$U" keys install 200 "$WORK/ops/root/root.pub" --yes-write-update-key >/dev/null 2>&1
+"$U" floor init --yes-init-rollback-counter >/dev/null 2>&1
+BUILD_KEY="$WORK/ops/sign/key-build"
+head -c 30000 /dev/urandom > built.itb
+echo '{ "tropic01_sv": 4, "metadata_version": "1.1", "compat_version": "1.0", "supported_devices":["openwrt,one"], "version": { "dist": "OpenWrt" } }' | fwtool -I - built.itb
+# the four commands of include/image-commands.mk, Build/append-metadata
+cp "$BUILD_KEY.ucert" built.itb.ucert
+usign -S -m built.itb -s "$BUILD_KEY" -x built.itb.sig
+ucert -A -c built.itb.ucert -x built.itb.sig
+fwtool -S built.itb.ucert built.itb
+check "an image signed as the build signs it: accepted" 0 "$(run check built.itb)"
+check_contains "with its security version" "security version 4" "$(cat err.txt)"
+check "the same image against the earlier root only: refused" 1 "$(T mem erase 200 >/dev/null 2>&1; "$U" keys install 200 keys/root.pub --yes-write-update-key >/dev/null 2>&1; run check built.itb)"
+echo 5 > image-sv; "$U" commit >/dev/null 2>&1; rm -f image-sv   # floor back to 5 for the hook checks below
+
 echo "# the sysupgrade hook: a refusal cannot be forced"
 sed "s#/usr/sbin/tropic01-update#$U#" "$HOOK" > hook.sh
 # shellcheck disable=SC1091,SC2329  # hook.sh is generated above; notify_firmware_broken is called by the hook
