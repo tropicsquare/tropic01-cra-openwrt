@@ -297,8 +297,10 @@ Annex I 2(c), 2(f) for the update path. Design: [cra-07 design](../../features/c
 - **10.2 Build side.** *Done:* OpenWrt patch 0003 (`tropic01_sv` in the signed metadata), the harness step
   (`TROPIC01_SIGNING_DIR`, `TROPIC01_IMAGE_SV`; nothing left behind when unset), the running image's security version in the
   root filesystem, and the host tool `tropic01-update-keys.sh`. Docker builds do not pass the signing directory in yet. *M.*
-- **10.3 Spare chip.** Root key in R-MEM, counter initialised (**irreversible range**), signed image accepted, tampered,
-  foreign and older images refused, commit after boot. *S.*
+- **10.3 Spare chip.** *Done 2026-10-11 (hardware report):* root key in R-MEM, counter initialised, signed images accepted,
+  unsigned, tampered, foreign-root and rolled-back images refused and not forceable, floor raised by exactly the right steps
+  after boot. Open: the OpenVPN stop and restart around the check on a unit that runs OpenVPN; the commit message is logged
+  twice. *S.*
 - **10.4 Certificate validity and the clock.** `ucert` certificates expire (one year by default); the router's clock is wrong
   until NTP. Decide the validity policy. *S.*
 - **10.5 Revocation.** How `ucert -R` records a revoked release key, and keeping that state in the chip. *S-M.*

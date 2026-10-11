@@ -258,3 +258,25 @@ was deleted, so no pairing slot is free; the R-config is the original.
 The bench unit (TROPIC01-ES) now has a per-unit pairing key in slot 1 and an owner key in slot 3, and its shared key is
 restricted to PING; the PKCS#11 module, the vault and the OpenVPN tunnel work with the per-unit key. This was done with
 tooling from the secure-update branch and is recorded in detail there. Slot 0 was not invalidated.
+
+## cra-07 secure update on the spare chip (2026-10-11)
+
+Router: OpenWrt One with the spare TROPIC01 (S/N ...0358, firmware 2.2.0, production slot-0 key, `slot0-key` = `prod0`). Images
+built from `feat/secure-update` with `TROPIC01_SIGNING_DIR` (test root `ca41a5cdf31a46cd`, release key with a `ucert`
+certificate from it) and `TROPIC01_IMAGE_SV`, plus `tropic01-secure-update` in the image. OpenVPN stopped and checked by PID
+before every chip command.
+
+| Step | Result |
+|---|---|
+| Flash the signed SV 1 image (the old image had no check) | boots; hook, `ucert`, `tropic01-update`, keep-list entry and `/usr/share/tropic01/image-sv` = 1 present |
+| First boot commit, before provisioning | **found a bug:** with no `slot0-key` yet the counter could not be read, and `commit` went on with an empty floor and tried to count down (it failed only because the session failed too). Fixed: an unreadable floor stops `check` and `commit` with nothing changed; sandbox regression test (fails 6 checks on the old code) |
+| Provision (chip writes) | root public key stored in R-MEM slot 200 and read back; counter 0 initialised to 1000 (floor 0; the range is fixed from now on) |
+| `validate_firmware_image` (what `sysupgrade` and LuCI use), floor 0 | signed SV 2 and SV 1: valid; **unsigned**: invalid, not forceable ("no signature"); **tampered** (one byte changed, original signature kept): invalid, not forceable (fwtool's checksum on the metadata already fails); **signed under a foreign root**: invalid, not forceable ("does not lead to an update root key held in TROPIC01"); `sysupgrade -F -T`: "Image check failed" |
+| Real `sysupgrade` to SV 2 | the hook accepted it ("security version 2 (floor 0)"), settings kept, `slot0-key` survived (keep list) |
+| Boot commit | "rollback floor raised from 0 to 2"; counter 0 = **998** (exactly two steps) |
+| Rollback | SV 1 image at floor 2: invalid, **not forceable**, "refusing a rollback"; `sysupgrade -F -T`: "Image check failed"; SV 2 (same level) still valid |
+
+Not run on hardware: stopping and restarting OpenVPN around the check (this chip has no VPN key, so OpenVPN does not run; covered
+by the sandbox). Seen: the commit message is logged twice (stderr captured by procd plus `logger`), cosmetic. State left: the
+router runs the SV 2 image with enforcement on; R-MEM slot 200 holds the test root; counter 0 is 998 (floor 2). Further updates
+of this unit need images signed under that test root with SV >= 2 (keys kept outside the repository on the bench PC).

@@ -55,7 +55,9 @@ file is the work plan.
   `TROPIC01_IMAGE_SV`), `host-tools/tropic01-update-keys.sh`, sandbox checks for both (66 in total). Verified with a real build:
   signed image with `tropic01_sv` 1 accepted by `ucert -V` against the root; a build without the variables is unsigned and
   leaves no key or security version behind.
-- **Not started:** milestones 3 to 5 below.
+- **Done (milestone 3, 2026-10-11):** spare chip end to end, see the hardware report. It found and fixed a bug: an unreadable
+  floor must stop `check` and `commit` (an empty value would turn every step into a counter decrement).
+- **Not started:** milestones 4 and 5 below.
 
 ## 3. Design in one page
 
@@ -173,7 +175,7 @@ Never print a secret key; refuse a DIR inside a git work tree; refuse to overwri
   - a build **without** the variables is unsigned and has no `image-sv` (no leakage).
 - `make lint`, `make test`, `scripts/check-doc-links.py`, the gitleaks scan: all clean.
 
-## 6. Milestone 3: spare chip (next; needs the user, step by step)
+## 6. Milestone 3: spare chip (done; kept as the runbook for the next unit)
 
 Only on the **spare chip** (S/N 0x02001101085B1905090D000000000358, firmware 2.2.0, production slot-0 key: put `prod0` in the
 key directory's `slot0-key` or pass `--key prod0`). Write one script per phase, the user runs it, you read the log. Each

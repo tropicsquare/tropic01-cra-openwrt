@@ -1,13 +1,13 @@
 # cra-07-secure-update — signed updates and rollback protection
 
-**CRA Annex I, Part I, 2(c) and 2(f), for the update path. Status: in progress (router side and build side done and tested in the sandbox and a real build; not yet on a router).**
+**CRA Annex I, Part I, 2(c) and 2(f), for the update path. Status: in progress: works end to end on a router with a spare chip (signed images accepted, unsigned, tampered, foreign and rolled-back images refused and not forceable, floor raised after boot); open items in the backlog, section 10.**
 
 ## At a glance
 
 | | |
 |---|---|
 | Requirement | 2(c): security updates; 2(f): integrity of the software, here at the moment it is installed |
-| Status | in progress: router-side check, build signing and the host key tool done; the chip run is still to do |
+| Status | in progress: router side, build signing and host tool done; verified on a router with a spare chip (hardware report, 2026-10-11) |
 | Irreversible step | initialising the rollback counter fixes its range; burning the counter-init right away (optional) |
 | Not this feature | secure boot (the SoC and U-Boot checking what they boot): [cra-02-verified-boot](../cra-02-verified-boot/) |
 
@@ -44,7 +44,7 @@ Commands: `tropic01-update status | check IMAGE | commit | keys install SLOT FIL
   something this code can enforce.
 - **Fail closed** means a unit with a dead or alarmed chip cannot be updated remotely.
 - Certificate validity windows and a wrong clock before NTP can refuse good images: see the design, section 4.
-- Nothing is provisioned yet, and the package is not in the default image (`openwrt.config` leaves it commented out).
+- Only a spare chip has been provisioned, and the package is not in the default image (`openwrt.config` leaves it commented out).
 
 ## Building a signed image
 

@@ -20,7 +20,7 @@ is how "secure by design" turns into "secure by checklist".
 | [cra-03-key-storage](../../features/cra-03-key-storage/) | 2(e) | confidentiality of stored and transmitted data | done for OpenVPN: the key is generated and used inside TROPIC01, verified on hardware including the boot-time start; AWS IoT telemetry is moved to the backlog (3.1) and not claimed |
 | [cra-04-access-control](../../features/cra-04-access-control/) | 2(d) | authentication, identity, access control | partial: per-device identity done; `tropic01-pairing` provisions a per-unit key and restricts the shared key (bench unit and a spare chip); slot 0 is not invalidated, other units still use the shared key |
 | [cra-05-secure-erase](../../features/cra-05-secure-erase/) | 2(m) | secure removal of user data and settings | partial: a small encrypted vault with a TROPIC01-held key and crypto-erase (verified on hardware); the rest of the overlay is not encrypted |
-| [cra-07-secure-update](../../features/cra-07-secure-update/) | 2(c), 2(f) | signed sysupgrade, rollback protection | in progress: router-side check sandbox-tested; not yet on a router |
+| [cra-07-secure-update](../../features/cra-07-secure-update/) | 2(c), 2(f) | signed sysupgrade, rollback protection | in progress: works end to end on a router with a spare chip; not in the default image |
 | [cra-06-security-logging](../../features/cra-06-security-logging/) | 2(l) | security logging with a user opt-out | partial: event log, change audit and opt-out; not tamper-proof, no TROPIC01 involvement |
 
 What is still open, feature by feature, is in [backlog.md](backlog.md).

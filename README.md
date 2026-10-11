@@ -38,7 +38,7 @@ Each row is a folder under [`features/`](features/) with its own README.
 | [cra-03-key-storage](features/cra-03-key-storage/) | 2(e) confidentiality | OpenVPN client whose private key lives in the chip | **central:** generates the key, signs inside the chip, stores the certificate | done for OpenVPN |
 | [cra-04-access-control](features/cra-04-access-control/) | 2(d) authentication | per-unit keys for talking to the chip | **central:** pairing keys and access privileges | partial: per-unit key on the bench unit and a spare chip; slot 0 restricted, not invalidated |
 | [cra-05-secure-erase](features/cra-05-secure-erase/) | 2(m) secure data removal | an encrypted vault that can be destroyed cryptographically | **central:** random key and key storage, erased on destroy | partial: one folder, not the whole disk |
-| [cra-07-secure-update](features/cra-07-secure-update/) | 2(c), 2(f) signed updates, rollback | signed `sysupgrade`, root key and rollback floor in TROPIC01 | in progress: sandbox-tested, not on a router yet |
+| [cra-07-secure-update](features/cra-07-secure-update/) | 2(c), 2(f) signed updates, rollback | signed `sysupgrade`, root key and rollback floor in TROPIC01 | in progress: verified on a router with a spare chip; not in the default image |
 | [cra-06-security-logging](features/cra-06-security-logging/) | 2(l) logging with opt-out | a security event log and a change audit | **none today** (a signed log is on the backlog) | partial |
 
 What is still open, with dependencies and order, is in the [CRA backlog](docs/cra/backlog.md). The
