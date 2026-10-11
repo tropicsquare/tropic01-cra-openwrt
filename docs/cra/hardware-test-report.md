@@ -280,3 +280,25 @@ Not run on hardware: stopping and restarting OpenVPN around the check (this chip
 by the sandbox). Seen: the commit message is logged twice (stderr captured by procd plus `logger`), cosmetic. State left: the
 router runs the SV 2 image with enforcement on; R-MEM slot 200 holds the test root; counter 0 is 998 (floor 2). Further updates
 of this unit need images signed under that test root with SV >= 2 (keys kept outside the repository on the bench PC).
+
+## Least-privilege runtime key on the bench chip (cra-07 10.6, 2026-10-11)
+
+Old bench chip (TROPIC01-ES, S/N ...0014, firmware 0.1.2, ES01 shared key), in the router running the signed cra-07 image.
+Decisions: the runtime key keeps R-MEM write (the vault needs it), the owner key is offline, R-config only (reversible).
+OpenVPN stopped and checked by PID before chip commands.
+
+| Step | Result |
+|---|---|
+| Pairing slots (one way) | slot 1: runtime key (private half in `/etc/tropic01/`), slot 3: owner key (private half only on the bench PC); both written with the shared key, read back, and each opens a session. Slot 2 left free. |
+| Configuration | built offline with `tropicctl config deny`: key 0 (shared) keeps only PING, key 2 (empty slot) nothing, key 1 (runtime) loses counter init, R-config write/erase, I-config write, pairing write/invalidate, ECC generate/store/erase; applied with the owner key (backup first), chip restarted |
+| Runtime key refused (exit 5) | counter init, pairing write, ECC generate, and an R-config rewrite ("failed before anything was erased: LT_L3_UNAUTHORIZED"; the configuration is unchanged) |
+| Runtime key allowed | R-MEM read, ECC list, counter get, random, configuration read |
+| Shared key | opens a session (PING), refused for R-MEM and counter init |
+| Running system | vault init/write/lock/unlock/destroy with the runtime key; the PKCS#11 module uses the per-unit key (slot 1); OpenVPN tunnel up, "signature complete: 64 bytes produced by TROPIC01 hardware", 4 of 4 pings |
+| Reversible | the owner key restored the original configuration (the shared key could read R-MEM again), then applied the restriction again; the runtime key is again refused counter init |
+
+What this shows: on this chip, software holding only the runtime key (root on the router) can no longer lower a rollback floor,
+change the access rights, add a pairing key or create keys; it can still read and write R-MEM (by decision), so the update root
+key slots stay writable by it. State left: restricted configuration in force; backup `/etc/tropic01/rconfig-before-least-privilege.cfg`;
+OpenVPN stopped (it starts at the next boot). This bench unit now has a per-unit key and a restricted shared key: the cra-04 README's
+"no unit has been provisioned" no longer holds for it and is to be updated with the cra-04 branch.

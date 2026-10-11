@@ -39,7 +39,9 @@ Commands: `tropic01-update status | check IMAGE | commit | keys install SLOT FIL
 - **Root on a running router** can edit these scripts, and while the device's pairing key may write R-MEM it can replace
   the root key in the chip. R-MEM rights are all-or-nothing per pairing key, so the vault's write right covers these slots too.
 - **The floor can be lowered** by anyone holding a pairing key with the counter-init right (`counter init` can be repeated on
-  the chip). Removing that right from the device key is needed for the floor to mean anything against a local attacker.
+  the chip). The least-privilege profile (design, section 7) removes that right from the runtime key; it was run on the bench
+  chip, but nothing provisions it automatically yet, and the runtime key keeps R-MEM write, so it can still replace the root
+  key slots.
 - **The security version is whatever the build says.** Raising it for every security fix is a release-process rule, not
   something this code can enforce.
 - **Fail closed** means a unit with a dead or alarmed chip cannot be updated remotely.

@@ -305,8 +305,10 @@ Annex I 2(c), 2(f) for the update path. Design: [cra-07 design](../../features/c
   until NTP. Decide the validity policy. *S.*
 - **10.5 Revocation.** How `ucert -R` records a revoked release key, and keeping that state in the chip. *S-M.*
 - **10.6 Narrow who may write the root key slots and initialise the counter** (cra-04 key split, then optionally I-config).
-  *Designed (cra-07 design, section 7); `tropicctl config deny` builds the restricted configuration.* Open: the decisions in
-  section 7 (R-MEM write, owner key slot and custody, reversible or permanent, which chip) and a chip run. *M.*
+  *Done on the bench chip, reversible (hardware report, 2026-10-11):* runtime key in slot 1 without counter init,
+  configuration, pairing or ECC-creation rights; offline owner key in slot 3; shared key PING only. Decided: the runtime key keeps
+  R-MEM write (so the root key slots stay writable by it). Open: a provisioning tool for this profile (fold into
+  `tropic01-pairing`), and the permanent I-config variant (separate decision). *M.*
 - **10.7 Release key inside a TROPIC01 on the build side.** *M.*
 - **10.8 CI.** Build OpenWrt's `usign`, `ucert` and `fwtool` in CI so `secure-update.sh` runs there instead of skipping. *S.*
 

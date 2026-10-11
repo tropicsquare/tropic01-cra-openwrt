@@ -126,6 +126,7 @@ the router (kept by the operator, brought in only for maintenance). Without an o
 is effectively permanent. Burning the same bits in the I-config makes it permanent on purpose (one-way, firmware 2.0.0 or
 newer, read back).
 
-Open decisions before any chip step: R-MEM write on the runtime key (keep, or move vault init/destroy and key installation
-to the owner key); the owner key's slot and custody; reversible (R-config) or permanent (I-config); which chip to test on
-(the spare chip has no free pairing slot left).
+Decided (2026-10-11): the runtime key keeps R-MEM write; the owner key is offline, in pairing slot 3; R-config only
+(reversible). *Measured* on the bench chip: the runtime key is refused counter init, configuration rewrite, pairing write and ECC
+generation; the vault, the PKCS#11 module and the OpenVPN tunnel work with it; the owner key undoes and reapplies the profile.
+Consequence of the R-MEM decision: the floor is now out of the device's reach, the root key slots are not.
