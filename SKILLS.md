@@ -17,7 +17,7 @@ and ask them to follow them.
 | Skill | Use it for | File |
 |---|---|---|
 | `build-image` | Building the firmware image or a single package, reading build failures, finding the outputs and SBOM | [.claude/skills/build-image/SKILL.md](.claude/skills/build-image/SKILL.md) |
-| `tropic01-pkcs11` | TROPIC01 integration: `lt-util`, the PKCS#11 module, slot layout, key and certificate provisioning, known pitfalls | [.claude/skills/tropic01-pkcs11/SKILL.md](.claude/skills/tropic01-pkcs11/SKILL.md) |
+| `tropic01-pkcs11` | TROPIC01 integration: `tropicctl`, the PKCS#11 module, slot layout, key and certificate provisioning, known pitfalls | [.claude/skills/tropic01-pkcs11/SKILL.md](.claude/skills/tropic01-pkcs11/SKILL.md) |
 
 ## Rules every agent must follow
 

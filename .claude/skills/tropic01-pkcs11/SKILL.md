@@ -2,11 +2,11 @@
 name: tropic01-pkcs11
 description: >
   Build, provision, and troubleshoot this OpenWrt package feed that adds TROPIC01 secure-element
-  support (libtropic, libtropic-pkcs11, lt-util, coreMQTT/AWS IoT, pkcs11-provider).
+  support (libtropic, libtropic-pkcs11, tropicctl, coreMQTT/AWS IoT, pkcs11-provider).
   Use when: building firmware with TROPIC01/PKCS#11 packages, generating or exporting
   hardware-backed P-256 keys, provisioning X.509 certs into TROPIC01 R-MEM, wiring
   OpenVPN or AWS IoT to the PKCS#11 module, fixing "no space on device" firmware issues,
-  debugging SPI/lt-util errors, performing PKCS#11 data operations (sign, verify, encrypt,
+  debugging SPI/tropicctl errors, performing PKCS#11 data operations (sign, verify, encrypt,
   decrypt, digest, random), or extending libtropic-pkcs11 patches.
 ---
 
@@ -44,7 +44,7 @@ TROPIC01-ES  (Mikroe Click board, 3.3 V, 1 MHz SPI)
 |---|---|
 | `libtropic` | Base library for talking to TROPIC01 (secure channel, L2/L3 protocol) |
 | `libtropic-pkcs11` | PKCS#11 v2.40 Cryptoki module (`libtropic_pkcs11.so`) — has patches 001–006, see below |
-| `lt-util` | CLI provisioning tool: generate keys, read pubkey, write/read R-MEM slots |
+| `tropicctl` | Command-line tool: chip and firmware info, random numbers, ECC keys, R-MEM, pairing keys, configuration, PIN (MAC-and-Destroy), counters; installed as `lt-util` too (compatibility mode) |
 | `pkcs11-provider` / `pkcs11-helper` | OpenSSL PKCS#11 engine/provider glue used by OpenVPN |
 | `coreMQTT` | AWS IoT MQTT client (`features/cra-03-key-storage/`; see `aws/README.md` and `docs/solution-description.md`) |
 
@@ -73,7 +73,7 @@ Located in [`features/core/libtropic-pkcs11/patches/`](../../../features/core/li
 | 7 | `007-load-per-unit-pairing-key.patch` | Loads a per-unit pairing key instead of the shared engineering-sample key, when one is provisioned |
 | 8 | `008-port-to-libtropic-4.2.patch` | Builds against the feed's libtropic 4.2.0 tree; signs a 32-byte hash with `lt_ecc_ecdsa_sign()` (no second hash) |
 
-`lt-util` carries its own patches in [`features/core/lt-util/patches/`](../../../features/core/lt-util/patches/) (SPI device, engineering-sample keys, P-256 and full public-key export, per-unit pairing key). `lt-util -e -s` signs with EdDSA only and fails on a P-256 slot: sign through PKCS#11 / OpenSSL instead.
+`tropicctl` ([features/core/tropicctl/](../../../features/core/tropicctl/), specification in `SPEC.md`) replaces the patched `lt-util`; it is its own source tree with no patches. A P-256 key signs through `tropicctl ecc sign` (ECDSA, with OpenSSL-compatible DER output) or through PKCS#11 / OpenSSL.
 
 ---
 
@@ -121,7 +121,7 @@ fragment, and builds:
 make                                 # full image
 make package PKG=libtropic           # one package, verbose
 make package PKG=libtropic-pkcs11
-make package PKG=lt-util
+make package PKG=tropicctl
 make package PKG=openvpn
 make menuconfig                      # change the assembled .config interactively
 ```
@@ -167,7 +167,7 @@ All provisioning steps run **on the router** over SSH.
 ### 1. Verify SPI Connectivity
 
 ```bash
-lt-util -i
+tropicctl info chip
 # There is no separate "connectivity" flag — -i prints the chip
 # identification block; a successful read confirms SPI/GPIO wiring and
 # pairing keys both work. Expected: lines like
@@ -181,7 +181,7 @@ lt-util -i
 ### 2. Generate Hardware Key
 
 ```bash
-lt-util -e -g 0
+tropicctl ecc generate 0 --curve p256
 # Expected: lt_ecc_key_generate() : LT_OK
 ```
 
@@ -190,7 +190,7 @@ The private key is generated inside TROPIC01 and **cannot be exported**.
 ### 3. Export Public Key
 
 ```bash
-lt-util -e -d 0 /tmp/tropic_pub.bin
+tropicctl ecc pub 0 --out /tmp/tropic_pub.bin
 # Expected: Curve: P256, Number of elements written: 64
 ```
 
@@ -207,7 +207,7 @@ To install a profile without editing configs by hand, use
 
 Rules that apply to every step that writes the chip:
 
-- Key generation (`lt-util -e -g N`) and certificate storage (`lt-util -m -s N+1 file`)
+- Key generation (`tropicctl ecc generate N`) --curve p256 and certificate storage (`tropicctl mem write N+1 --in file`)
   are irreversible for that slot: get explicit user confirmation first.
 - Every router needs a unique certificate CN.
 - Never commit a filled-in `.ovpn`, certificates or keys.
@@ -345,7 +345,7 @@ C_GenerateRandom(session, randomData, sizeof(randomData));
   signs the 32-byte digest OpenVPN passes via `CKM_ECDSA` directly (patch
   `008-port-to-libtropic-4.2.patch`); a second hash makes every signature invalid.
 
-- **`LT_L2_SPI_ERROR` from `lt-util`**: Check physical SPI/GPIO wiring.
+- **`LT_L2_SPI_ERROR` from `tropicctl`**: Check physical SPI/GPIO wiring.
   Verify `/dev/spidev2.0` and `/dev/gpiochip0` exist on the target.
 
 - **`LT_HOST_SECURE_CHANNEL_SETUP` error**: Pairing keys mismatch — confirm firmware
@@ -400,7 +400,7 @@ To report a vulnerability: **security@tropicsquare.com** (see
 | `/etc/ssl/tropic01-aws/AmazonRootCA1.pem` | Amazon Root CA for AWS IoT TLS |
 | `/etc/ssl/tropic01-aws/device.pem` | Device certificate (PEM) |
 | `/etc/config/tropic01-aws` | UCI config — endpoint, topic, interval |
-| `/usr/bin/lt-util` | TROPIC01 provisioning tool |
+| `/usr/bin/tropicctl` (and the `lt-util` symlink) | TROPIC01 command-line tool |
 | `/usr/lib/libtropic_pkcs11.so` | PKCS#11 provider |
 
 ---

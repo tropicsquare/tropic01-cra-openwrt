@@ -27,7 +27,7 @@ define Package/tropic01-aws
   CATEGORY:=Utilities
   TITLE:=TROPIC01 AWS IoT Core client
   URL:=https://github.com/tropicsquare/libtropic-pkcs11
-  DEPENDS:=+libtropic-pkcs11 +pkcs11-provider +libopenssl
+  DEPENDS:=+tropicctl +libtropic-pkcs11 +pkcs11-provider +libopenssl
 endef
 
 define Package/tropic01-aws/description

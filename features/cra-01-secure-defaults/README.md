@@ -125,7 +125,7 @@ Today the script's only entropy source is `/dev/urandom` (the kernel
 CSPRNG, 128 bits — already a real improvement over any serial-derived
 formula). TROPIC01-sourced entropy is not implemented; the script logs
 that plainly on every run rather than implying it. Wiring an actual raw
-random pull from TROPIC01 needs a host-native `lt-util`/`libtropic` build
+random pull from TROPIC01 needs a host-native `tropicctl`/`libtropic` build
 talking to the chip over USB or a host SPI adapter — see
 [libtropic](https://github.com/tropicsquare/libtropic) — which is future
 work, not a prerequisite for this credential to already be a real
@@ -246,7 +246,7 @@ first-boot MOTD and dropbear banners removed; an empty-string hash planted,
 detected by the guard and cleared both by hand and by the S99 boot-time run
 (before any login); the `ttylogin=0` repair; the dev-marker skip; LuCI
 answering over HTTP and HTTPS and rpcd rejecting an empty password; and
-`lt-util` reading the chip ID, the slot-1 public key and the slot-1
+`tropicctl` reading the chip ID, the slot-1 public key and the slot-1
 certificate with the current image. Also in a sandbox (fake `passwd`/`uci`/
 `ubus`, pseudo-tty): every hook and guard branch. The first clean boot of
 this image once left a root hash set with `ttylogin` at 0; the cause is not

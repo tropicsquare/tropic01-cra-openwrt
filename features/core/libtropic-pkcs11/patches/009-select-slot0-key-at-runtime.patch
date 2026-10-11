@@ -1,0 +1,55 @@
+Choose the slot-0 pairing key at run time: es01 or prod0.
+
+Patch 003 fixed the shared pairing key to the engineering sample (ES01). A chip
+with production provisioning refuses that key (LT_CRYPTO_ERR) and answers to
+the published prod0 key. The module now reads the name from $TROPICCTL_SH0 or
+from /etc/tropic01/slot0-key (the file tropicctl reads too); "es01" stays the
+default so existing units behave as before. A per-unit key (patch 007) still
+takes precedence over either shared key.
+
+--- a/src/pkcs11.c	2026-10-10 20:59:33.875757611 +0200
++++ b/src/pkcs11.c	2026-10-10 20:59:33.891757827 +0200
+@@ -41,6 +41,35 @@
+  * units still work. Key file present but unusable: fail, never fall back
+  * silently to the shared key.
+  */
++/*
++ * Which published slot-0 key the chip answers to. Chips with production provisioning refuse the engineering-sample key.
++ * The name "es01" (engineering sample, the default) or "prod0" (production) is taken from $TROPICCTL_SH0, else from the
++ * first line of /etc/tropic01/slot0-key (the same setting tropicctl reads). Anything else keeps the default.
++ */
++#define LT_PKCS11_SH0_NAME_FILE "/etc/tropic01/slot0-key"
++
++static void lt_pkcs11_select_sh0(const uint8_t **priv, const uint8_t **pub)
++{
++    char name[16] = {0};
++    const char *env = getenv("TROPICCTL_SH0");
++    if (env && *env) {
++        snprintf(name, sizeof(name), "%s", env);
++    } else {
++        FILE *f = fopen(LT_PKCS11_SH0_NAME_FILE, "r");
++        if (f) {
++            if (fgets(name, sizeof(name), f)) {
++                name[strcspn(name, "\r\n")] = '\0';
++            }
++            fclose(f);
++        }
++    }
++    if (strcmp(name, "prod0") == 0) {
++        *priv = lt_sh0priv_prod0;
++        *pub = lt_sh0pub_prod0;
++        syslog(LOG_INFO, "tropic-pkcs11: using the production (prod0) slot-0 key");
++    }
++}
++
+ #define LT_PKCS11_PAIRING_KEY_FILE  "/etc/tropic01/pairing.key"
+ #define LT_PKCS11_PAIRING_PUB_FILE  "/etc/tropic01/pairing.pub"
+ #define LT_PKCS11_PAIRING_SLOT_FILE "/etc/tropic01/pairing.slot"
+@@ -581,6 +610,7 @@
+     /* Establish authenticated encrypted session with TROPIC01 */
+     const uint8_t *sh_priv = LT_PKCS11_SH0_PRIV;
+     const uint8_t *sh_pub = LT_PKCS11_SH0_PUB;
++    lt_pkcs11_select_sh0(&sh_priv, &sh_pub);
+     uint8_t unit_priv[32] = {0};
+     uint8_t unit_pub[32] = {0};
+     uint8_t pkey_slot = TR01_PAIRING_KEY_SLOT_INDEX_0;

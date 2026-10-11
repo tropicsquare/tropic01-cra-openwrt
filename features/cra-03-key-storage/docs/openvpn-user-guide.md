@@ -27,10 +27,10 @@ engineering sample, 2026-10-05). The table at the end summarises it, including a
 ## 1. Before you start
 
 On the router (the cra-03 image has all of this): `openvpn` with the PKCS#11 module
-`/usr/lib/libtropic_pkcs11.so`, `lt-util`, the `tun` module, and the `openssl` command line
+`/usr/lib/libtropic_pkcs11.so`, `tropicctl`, the `tun` module, and the `openssl` command line
 (`openssl-util`, with the provider package `pkcs11-provider`). On an older image: `apk add openssl-util`.
 
-**TROPIC01 allows one SPI session at a time.** A running OpenVPN holds it. Before any `lt-util` or
+**TROPIC01 allows one SPI session at a time.** A running OpenVPN holds it. Before any `tropicctl` or
 `openssl` step below, stop it: `/etc/init.d/openvpn stop`. The installer script in step 7 does this for you.
 
 **How the slots line up.** A key lives in an **ECC slot N**; its certificate lives in **R-MEM slot N+1**;
@@ -56,7 +56,7 @@ On the development unit ECC slots 0-3 already hold keys. *(Verified.)*
 ## 2. Check the chip  *(verified)*
 
 ```sh
-lt-util -i        # prints the chip identification; a successful read is the connectivity check
+tropicctl info chip        # prints the chip identification; a successful read is the connectivity check
 ```
 
 If it fails with a GPIO "resource busy" error, something else holds the SPI session: stop OpenVPN.
@@ -67,8 +67,8 @@ If it fails with a GPIO "resource busy" error, something else holds the SPI sess
 > way to read it. Use a free ECC slot (here `N`).
 
 ```sh
-lt-util -e -g N                   # generate a P-256 key in ECC slot N
-lt-util -e -d N /tmp/pub.bin      # download its PUBLIC key: 64 bytes, X||Y
+tropicctl ecc generate N --curve p256                   # generate a P-256 key in ECC slot N
+tropicctl ecc pub N --out /tmp/pub.bin      # download its PUBLIC key: 64 bytes, X||Y
 wc -c < /tmp/pub.bin              # must print 64
 ```
 
@@ -77,8 +77,9 @@ On hardware the key came out as P-256 (`prime256v1`), and the downloaded public 
 ## 4. Make a certificate request (CSR)  *(verified)*
 
 The request is **signed by the chip**, which proves to the CA that you hold the private key.
-(`lt-util -e -s` cannot do this: it signs with EdDSA and fails on a P-256 key with
-`LT_L3_ECC_INVALID_KEY`. Use OpenSSL with the PKCS#11 provider, as below.)
+(Do not use `lt-util -e -s` for this: it signs with EdDSA and fails on a P-256 key. `tropicctl ecc sign` handles
+P-256 keys, but a certificate request needs the whole X.509 structure signed, which OpenSSL with the PKCS#11
+provider does, as below.)
 
 Create an isolated OpenSSL config once:
 
@@ -160,10 +161,10 @@ one, the **TLS key** (`tls-crypt`). Never send the CA's private key anywhere.
 > Writes R-MEM slot N+1. The slot must be empty; check first.
 
 ```sh
-lt-util -m -r $((N+1)) /tmp/probe        # expect an error "SLOT_EMPTY" if it is free
+tropicctl mem read $((N+1)) --out /tmp/probe        # expect an error "SLOT_EMPTY" if it is free
 ssh root@<router> 'cat > /tmp/router01.der' < router01.der
-lt-util -m -s $((N+1)) /tmp/router01.der           # write
-lt-util -m -r $((N+1)) /tmp/back.der && cmp /tmp/router01.der /tmp/back.der && echo STORED_OK
+tropicctl mem write $((N+1)) --in /tmp/router01.der           # write
+tropicctl mem read $((N+1)) --out /tmp/back.der && cmp /tmp/router01.der /tmp/back.der && echo STORED_OK
 openvpn --show-pkcs11-ids /usr/lib/libtropic_pkcs11.so 2>&1 | grep -A2 -E 'DN:.*router01'
 ```
 
@@ -236,7 +237,7 @@ rm -f /etc/openvpn/tropic01.conf /etc/openvpn/tropic01-ca.crt /etc/openvpn/tropi
 ```
 
 Ask the VPN operator to **revoke the certificate**. The key stays in the chip; clearing an ECC slot
-(`lt-util -e -c N`) and erasing its certificate (`lt-util -m -e $((N+1))`) are irreversible. Both were run on a test
+(`tropicctl ecc erase N`) --yes-erase-ecc-key and erasing its certificate (`tropicctl mem erase $((N+1))`) are irreversible. Both were run on a test
 slot pair (4 and 5): afterwards the slot read as empty and every other slot was unchanged.
 
 ## 10. Troubleshooting
@@ -245,7 +246,7 @@ slot pair (4 and 5): afterwards the slot read as empty and every other slot was 
 |---|---|
 | `GPIO_V2_GET_LINE_IOCTL ... Resource busy`, `C_Initialize` fails | another process holds the chip's single SPI session: `/etc/init.d/openvpn stop`, stop `tropic01-aws`, retry |
 | the installer says "no certificate for key index N" | step 6 is missing: the certificate is not in R-MEM slot N+1 |
-| `lt-util -e -s` fails with `LT_L3_ECC_INVALID_KEY` | it signs with EdDSA only; use `openssl req` (step 4) for P-256 keys |
+| the old `lt-util -e -s` fails on a P-256 key | it signs with EdDSA only; use `tropicctl ecc sign` or `openssl req` (step 4) for P-256 keys |
 | `openssl req` finds no key | wrong id, or the slot has no key; list with `openvpn --show-pkcs11-ids` |
 | `openssl storeutl pkcs11:` hangs | known; do not use it |
 | certificate does not fit R-MEM | over 444 bytes: shorter subject, fewer extensions (step 5) |

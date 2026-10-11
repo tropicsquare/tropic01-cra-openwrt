@@ -68,7 +68,7 @@ own chip with its own secret, not a key anyone can look up
 Per-unit pairing keys mean a brand-new dev unit's chip is *unusable* —
 not just "has a guessable password" but literally cannot open a secure
 session — until someone provisions it individually. A shared engineering
-key is exactly what makes "flash any unit, SSH in, `lt-util -i` just
+key is exactly what makes "flash any unit, SSH in, `tropicctl info chip` just
 works" possible today. That convenience and Annex I 2(d) are in direct
 tension; there is no config flag that gets both.
 
@@ -102,7 +102,7 @@ convenience.
 
 ## Debug-build conveniences that must not reach anything resembling a release
 
-Not CRA-specific, but the same "quiet erosion" shape: `lt-util` builds
+Not CRA-specific, but the same "quiet erosion" shape: `tropicctl` is built
 with `LT_PRINT_SPI_DATA=1` (raw SPI bus traffic to stdout) and
 `libtropic-pkcs11` carries syslog tracing
 (`006-add-syslog-tracing.patch`) — both genuinely useful while bringing

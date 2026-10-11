@@ -28,10 +28,10 @@ log "Checking ECC slot 1..."
 if pkcs11-tool --module "$PKCS11_MODULE" \
         --read-object --type pubkey --id 01 >/dev/null 2>&1; then
     log "ECC slot 1 already has a key — skipping key generation"
-    log "(to regenerate: lt-util --generate-key --slot 1)"
+    log "(to regenerate: tropicctl ecc generate 1 --curve p256 --replace --yes-erase-ecc-key; the old key is lost)"
 else
     log "Generating P-256 key in TROPIC01 ECC slot 1..."
-    lt-util --generate-key --slot 1 || die "Key generation failed"
+    tropicctl ecc generate 1 --curve p256 || die "Key generation failed"
     log "Key generated in ECC slot 1"
 fi
 
@@ -71,15 +71,12 @@ else
     log "To write a certificate to TROPIC01 R-MEM slot 2:"
     log "  1. Get your signed DER certificate from your CA"
     log "     (submit CSR generated from /tmp/tropic01-aws-pubkey.pem)"
-    log "  2. lt-util --write-data --slot 2 --file device.cer.der"
+    log "  2. tropicctl mem write 2 --in device.cer.der"
     log "  3. Re-run tropic01-aws-provision"
     log ""
-    log "For AWS IoT self-signed (test) certificate:"
-    log "  openssl req -new -x509 -key /tmp/tropic01-aws-pubkey.pem \\"
-    log "    -subj '/CN=tropic01-aws' -days 3650 \\"
-    log "    -out /tmp/device.pem"
-    log "  openssl x509 -in /tmp/device.pem -outform DER -out /tmp/device.cer.der"
-    log "  lt-util --write-data --slot 2 --file /tmp/device.cer.der"
+    log "A certificate request signed by the chip's key can be made with OpenSSL and the PKCS#11 provider:"
+    log "see features/cra-03-key-storage/docs/openvpn-user-guide.md (step 4). Then store the signed DER certificate with:"
+    log "  tropicctl mem write 2 --in /tmp/device.cer.der"
 fi
 
 # --- Summary ---

@@ -1,7 +1,7 @@
 # Shared helpers for the sandbox tests. Source this; do not run it.
 #
 # These tests run the router-side shell scripts on a normal Linux host with fake `logread`,
-# `lt-util`, `cryptsetup` and friends, so their logic and safety rules can be checked without a board.
+# `tropicctl`, `cryptsetup` and friends, so their logic and safety rules can be checked without a board.
 # They do NOT test the crypto or the hardware: see tests/hardware for that.
 
 # shellcheck disable=SC2034  # REPO and WORK are used by the scripts that source this file

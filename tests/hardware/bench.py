@@ -232,56 +232,79 @@ def stripped_copy(path):
 
 
 def cmd_cra04(b, binary, host_ip):
-    """cra-04 phase 1 on the real chip, read-only: the new lt-util run from /tmp (nothing is flashed)."""
+    """cra-04 on the real chip, read-only: tropicctl (installed, or pushed to /tmp), nothing is flashed or written."""
     if not b.ensure_shell():
         b.record("could not reach a shell", False)
         return 1
     if binary == "installed":
-        lt = "/usr/bin/lt-util"
-        b.record("using the lt-util installed in the image", b.run("test -x %s && echo yes" % lt)[1].strip() == "yes")
+        tc = "/usr/bin/tropicctl"
+        b.record("using the tropicctl installed in the image", b.run("test -x %s && echo yes" % tc)[1].strip() == "yes")
     else:
         local = stripped_copy(binary)
-        ok = push_file(b, local, "/tmp/lt-new", host_ip)
-        b.record("pushed the patched lt-util to /tmp over the wired bench link", ok)
+        ok = push_file(b, local, "/tmp/tc-new", host_ip)
+        b.record("pushed tropicctl to /tmp over the wired bench link", ok)
         if not ok:
             return 1
-        lt = "/tmp/lt-new"
-    # The write command must refuse BEFORE touching the chip (no session is ever opened).
-    for name, args in (("without --irreversible", "-k -w 1 /tmp/none"),
-                       ("for slot 0", "-k -w 0 /tmp/none --irreversible"),
-                       ("for a file that is not 32 bytes", "-k -w 1 /etc/hostname --irreversible")):
-        rc, out = b.run("%s %s >/tmp/g.out 2>&1; echo rc=$?; grep -c 'Secure channel\\|lt_init' /tmp/g.out" % (lt, args))
-        b.record("pairing-slot write is refused " + name + ", before any chip access", "rc=1" in out and out.split()[-1] == "0", out.replace("\n", " "))
-    b.run("rm -f /tmp/g.out")
+        tc = "/tmp/tc-new"
 
-    def lt_run(args):
-        rc, out = b.run("%s %s >/tmp/lt.out 2>&1; echo rc=$?; cat /tmp/lt.out | grep -E 'per-unit|shared|unusable|Error sec channel|Secure channel established|ERROR' | head -6" % (lt, args), timeout=60)
-        return out
+    def run(args, timeout=60):
+        """Run tropicctl; returns (exit code, combined output without the key notices)."""
+        rc, out = b.run("%s %s >/tmp/tc.out 2>&1; echo rc=$?; cat /tmp/tc.out | head -12" % (tc, args), timeout=timeout)
+        lines = out.strip().split("\n")
+        code = -1
+        for line in lines:
+            if line.startswith("rc="):
+                code = int(line[3:])
+        return code, out
 
-    out = lt_run("-i")
-    b.record("shared key still in use when no key files exist (chip ID read)", "rc=0" in out and "no per-unit pairing key" in out, out.replace("\n", " | "))
-    out = lt_run("-m -r 1 /tmp/c1")
+    # The write command must refuse BEFORE touching the chip: no session is opened, so no key is ever chosen or announced.
+    for name, args, want in (("without --yes-write-pairing-slot", "pairing write 1 --in /tmp/none", 9),
+                             ("for slot 0", "pairing write 0 --in /tmp/none --yes-write-pairing-slot", 9),
+                             ("for a file that is not 32 bytes", "pairing write 1 --in /etc/hostname --yes-write-pairing-slot", 2)):
+        code, out = run(args)
+        b.record("pairing-slot write is refused " + name + ", before any chip access",
+                 code == want and "pairing key" not in out.replace("pairing key files", ""), out.replace("\n", " "))
+    code, out = run("--dry-run pairing write 1 --in /etc/hostname")
+    b.record("a pairing-slot write stays refused for a bad file even as a dry run", code == 2, out.replace("\n", " "))
+
+    code, out = run("session test")
+    b.record("shared key still in use when no key files exist (session test)", code == 0 and "no per-unit pairing key" in out, out.replace("\n", " | "))
+    code, out = run("info chip")
+    b.record("chip identification", code == 0 and "CHIP_ID ver" in out, out.replace("\n", " | ")[:200])
+    code, out = run("mem read 1 --out /tmp/c1")
     rc, size = b.run("wc -c < /tmp/c1")
-    b.record("secure session with the shared key still works (R-MEM slot 1 read)", "rc=0" in out and size.strip() == "299", "%s size=%s" % (out.replace("\n", " | "), size.strip()))
-    for slot in range(4):
-        out = lt_run("-k -r %d /tmp/pk%d" % (slot, slot))
-        rc, size = b.run("wc -c < /tmp/pk%d 2>/dev/null || echo none" % slot)
-        b.record("pairing slot %d inspected (informational)" % slot, True, "%s | file=%s" % (out.replace("\n", " | "), size.strip()))
+    b.record("secure session with the shared key still works (R-MEM slot 1 read)", code == 0 and size.strip() == "299", "rc=%s size=%s" % (code, size.strip()))
+    code, out = run("pairing list")
+    b.record("pairing slots inspected: slot 0 populated", code == 0 and "pairing slot 0: populated" in out, out.replace("\n", " | "))
+    code, out = run("info fw")
+    b.record("firmware version bytes", code == 0 and "RISCV_FW_VER" in out, out.replace("\n", " | "))
+    code, out = run("info mode")
+    b.record("chip mode", code == 0 and "application" in out, out.replace("\n", " | "))
+    code, out = run("config dump")
+    rc, n = b.run("%s config dump 2>/dev/null | wc -l" % tc, timeout=60)
+    b.record("configuration read: 27 R and 27 I objects", code == 0 and n.strip().split("\n")[-1] == "54", "lines=%s" % n.strip())
+    rc, n = b.run("%s ecc list 2>/dev/null | wc -l" % tc, timeout=90)
+    b.record("ECC slots listed (read-only)", n.strip().split("\n")[-1] == "32", "lines=%s" % n.strip())
+    code, out = run("rng get 16")
+    rc, n = b.run("%s rng get 16 2>/dev/null | tr -d '\\n' | wc -c" % tc)
+    b.record("16 random bytes", n.strip().split("\n")[-1] == "32", "chars=%s" % n.strip())
+    code, out = run("mem read 4000")
+    b.record("a slot number outside 0-511 is a usage error", code == 2, out.replace("\n", " | "))
 
     b.run("mkdir -p /etc/tropic01; chmod 755 /etc/tropic01; printf short > /etc/tropic01/pairing.key; printf short > /etc/tropic01/pairing.pub; echo 1 > /etc/tropic01/pairing.slot")
-    out = lt_run("-m -r 1 /tmp/x")
-    b.record("unusable key files: refuses, no silent fallback to the shared key",
-             "rc=0" not in out and "unusable" in out and "Secure channel established" not in out, out.replace("\n", " | "))
+    code, out = run("mem read 1 --out /tmp/x")
+    b.record("unusable key files: refuses (exit 4), no silent fallback to the shared key",
+             code == 4 and "unusable" in out and "shared engineering-sample key" not in out.replace("not falling back to the shared key", ""), out.replace("\n", " | "))
 
     b.run("head -c 32 /dev/urandom > /etc/tropic01/pairing.key; head -c 32 /dev/urandom > /etc/tropic01/pairing.pub; echo 0 > /etc/tropic01/pairing.slot")
-    out = lt_run("-m -r 1 /tmp/x")
-    b.record("a wrong but well-formed per-unit key is used and rejected by the chip",
-             "rc=0" not in out and "per-unit pairing key, slot 0" in out and "Error sec channel" in out, out.replace("\n", " | "))
+    code, out = run("mem read 1 --out /tmp/x")
+    b.record("a wrong but well-formed per-unit key is used and rejected by the chip (exit 4)",
+             code == 4 and "per-unit pairing key, slot 0" in out, out.replace("\n", " | "))
 
-    b.run("rm -rf /etc/tropic01 /tmp/x /tmp/c1 /tmp/pk0 /tmp/pk1 /tmp/pk2 /tmp/pk3")
-    out = lt_run("-m -r 1 /tmp/c1")
-    b.record("after removing the key files the shared key works again (chip not locked out)", "rc=0" in out, out.replace("\n", " | "))
-    b.run("rm -f /tmp/c1 /tmp/lt-new /tmp/lt.out")
+    b.run("rm -f /etc/tropic01/pairing.key /etc/tropic01/pairing.pub /etc/tropic01/pairing.slot /tmp/x /tmp/c1")
+    code, out = run("mem read 1 --out /tmp/c1")
+    b.record("after removing the key files the shared key works again (chip not locked out)", code == 0, out.replace("\n", " | "))
+    b.run("rm -f /tmp/c1 /tmp/tc-new /tmp/tc.out")
     return 0
 
 
@@ -476,7 +499,7 @@ def cmd_suite(b, host_ip):
     cra01 goes last: it plants an empty-password hash and reboots.
     """
     steps = [("web", lambda: cmd_web(b)),
-             ("cra04 (lt-util installed in the image)", lambda: cmd_cra04(b, "installed", host_ip)),
+             ("cra04 (tropicctl installed in the image)", lambda: cmd_cra04(b, "installed", host_ip)),
              ("cra05 stack (no chip access)", lambda: cmd_cra05(b, "stack")),
              ("cra06 (package installed in the image)", lambda: cmd_cra06(b, host_ip, installed=True)),
              ("cra01 (plants an empty hash, reboots, checks the guard)", lambda: cmd_cra01(b))]
@@ -614,7 +637,7 @@ def main():
     ap.add_argument("--no-replant", action="store_true",
                     help="cra01: do not log in, plant the empty hash and reboot first; start from the current console state")
     ap.add_argument("--binary", default=os.path.join(os.path.dirname(__file__), "..", "..", "build", "openwrt", "build_dir",
-                    "target-aarch64_cortex-a53_musl", "lt-util-0.1.0", "lt-util"), help="cra04: patched lt-util to push to /tmp")
+                    "target-aarch64_cortex-a53_musl", "tropicctl-0.1.0", "tropicctl"), help="cra04: tropicctl to push to /tmp (use --binary installed for the one in the image)")
     ap.add_argument("--host-ip", default="192.168.9.2", help="cra04: this PC's address on the wired bench link")
     ap.add_argument("--installed", action="store_true", help="cra06: the package is already in the image; do not push a payload")
     ap.add_argument("--phase", default="stack", help="cra05: stack (no chip access)")

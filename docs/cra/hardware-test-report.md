@@ -89,7 +89,7 @@ SHA-256 `814e8fb05ad3b0da4f27391390c2d0f4af5391d1cf4a489cfa328d8db1ae6ec3`.
   command, because libtropic 4.x needs the application to supply the crypto context of the handle.
 
 Not re-run in the first 4.2.0 run (done later, see below): the vault `init`/`destroy`, an OpenVPN tunnel
-(the bench has no WAN link) and the AWS test. The chip's firmware version has not been compared with what 4.2 ships.
+(the bench has no WAN link) and the AWS test. The chip's firmware has been compared with what 4.2 ships: it is **much older** (see the correction below).
 
 ### Clean-container build (2026-10-10)
 
@@ -122,3 +122,115 @@ Run by hand because they write and erase the chip (R-MEM slot 100 only; slot 1 s
 - **Honest limit:** a vault key in R-MEM is readable by anyone who can open a session with the chip, which today
   uses the shared engineering-sample pairing key (cra-04). The VPN's tls-crypt key (not the client private key) is
   stored as a `0600` file by design.
+
+### tropicctl phase 1, read-only run on the bench chip (2026-10-10)
+
+The new tool (`features/core/tropicctl`, aarch64 build, 88 KB) was copied to `/tmp` on the router with OpenVPN stopped,
+run, removed, and OpenVPN restarted. Only read commands were run; nothing was written to the chip.
+
+| Check | Result |
+|---|---|
+| `info chip` | the same CHIP_ID block `lt-util -i` prints (TROPIC01-ES) |
+| `info fw` | `00 02 01 00` / `00 01 03 00`, which libtropic's own example reads as byte 3 . byte 2 . byte 1: **RISC-V firmware 0.1.2, SPECT firmware 0.3.1** (see the correction below) |
+| `session test` | opens with the shared key; warns on stderr that no per-unit key exists |
+| `pairing list` | slot 0 populated, slots 1 to 3 empty (the fake's default, now **measured**) |
+| `config dump` | in legacy mode (`lt-util -x -r`) **byte-identical** to the earlier survey output |
+| `rng get 16` | 32 hex digits |
+| `mem list --range 0-10` | slots 0, 1 and 2 hold data (299, 299 and 383 bytes) |
+| exit codes | an empty slot is 6, a bad argument is 2 |
+| legacy mode | `lt-util -i`, `-x -f`, `-x -r`, `-k -r` behave like the old tool; `-k -r` on an empty slot returns 1 |
+
+**Observation to investigate (backlog 3.14):** R-MEM slot 0 reads back **identical to slot 1** (same 299 bytes, the
+certificate `CN=tropic01-client`), although the project documentation says slot 0 is read-protected on this silicon.
+Either that certificate was also stored in slot 0 at some point, or reads of slot 0 are answered with slot 1's data.
+Slot 2 holds a 383-byte self-signed certificate (`CN=openwrt-tropic01`), probably from the earlier AWS experiments.
+Nothing was written to find out; a test on a spare chip should write a distinct value to slot 1 and read slot 0.
+
+### tropicctl (all areas), read-only run on the bench chip (2026-10-11)
+
+The cross-built binary was copied to `/tmp` over SSH with OpenVPN stopped, run, removed and OpenVPN restarted. The
+serial console was silent, so the updated `bench.py cra04` could not be run; the same checks were run by hand over SSH.
+Nothing was written to the chip. **The commands that write (ECC key generation and erase, pairing write and
+invalidation, R-config rewrite, I-config burn, MAC-and-Destroy, counter init and update) were NOT run on hardware.**
+
+| Check | Result |
+|---|---|
+| refusals before any chip access | `pairing write` without its flag, for slot 0, with a bad file; `ecc erase` and `config rewrite` without their flags; `mem read 9999`: exit codes 9, 9, 2, 9, 9, 2, and no key announced |
+| `pairing write --dry-run` on empty slot 1 | passes all checks, says it would write, writes nothing |
+| `info chip`, `info fw`, `info mode`, `info cert` | chip ID; `00 02 01 00` / `00 01 03 00`; `application`; **four certificates of 423, 581, 626 and 626 bytes** |
+| `pairing list` | slot 0 populated, 1 to 3 empty |
+| `ecc list` | slots 0 and 1 P-256, slots 2 and 3 Ed25519, all "generated"; the rest empty |
+| `config dump --decode` | 54 raw lines plus decoded access groups; every access object `0xffffffff` (all four keys may do everything) |
+| `counter get 0` to `15` | all exit 6: `LT_L3_COUNTER_INVALID`, **never initialised** (measured; the fake had assumed it) |
+| `config restrict-shared --unit-slot 1` | refused (exit 9): "pairing slot 1 holds no usable key: restricting the shared key first would lock the chip" |
+| **ECDSA on the real chip** | `ecc sign 0 --der` over a message; **OpenSSL on the PC verifies it** against the PEM public key from `ecc pub 0 --format pem`; that key is identical to the public key in the certificate in R-MEM slot 1 |
+| EdDSA on a P-256 slot | exit 2 (refused, not a wrong answer) |
+| legacy mode | `lt-util -x -f` exit 0; `lt-util -k -r 1` on the empty slot exit 1 |
+
+### Correction: the bench chip's firmware version (2026-10-11)
+
+The firmware version bytes `00 02 01 00` (RISC-V) and `00 01 03 00` (SPECT) were first read as "App FW 2.1.0 and SPECT FW
+1.3.0" by matching them against release notes. That was wrong. libtropic's own example (`fw_update`) prints a version as
+`byte 3 . byte 2 . byte 1`, which gives **RISC-V 0.1.2 and SPECT 0.3.1**. The same reading of the TROPIC01 software model's
+bytes (`00 00 02 02`, `00 00 03 01`) gives 2.2.0 and 1.3.0, the versions libtropic 4.2 targets. So the bench chip runs
+**firmware older than 2.0.0**: I-Memory writes (pairing slots, I-config) can fail silently there, which makes the read-back
+after every such write essential, and it is far behind the 2.2.0 update files libtropic 4.2 ships. A firmware update is
+itself a risky step and has not been considered. Consequences: `tropicctl config burn` (which requires 2.0.0 or newer)
+refuses on this chip, as intended; the first version of that gate looked at the wrong byte and would have allowed it. That
+is fixed and has a regression test. Any statement elsewhere that the bench chip has firmware 2.1.0 is wrong.
+
+## Spare chip: firmware update and the commands that write (2026-10-10)
+
+A second TROPIC01 (P/N TR01-C2P-T101, silicon ACAB, CHIP_ID v1.0.0.0), used only for tests that cannot be undone. All
+commands are `tropicctl` built from the feed, run on the router over SSH.
+
+| Check | Result |
+|---|---|
+| First look | RISC-V 0.3.1, SPECT 0.3.1, application mode, Maintenance Mode enabled in the I-config and the R-config. The shared engineering key (ES01) is **refused** (`LT_CRYPTO_ERR`): this chip has production provisioning, and **`--key prod0`** (the production slot-0 key published with libtropic) opens a session. Pairing: slot 0 populated, 1 to 3 empty. |
+| Firmware update | `fw update --dir fw_v_2_2_0` (libtropic 4.2, `boot_v_2_0_1`): the chip reports **RISC-V 2.2.0, SPECT 1.3.0** afterwards; session, pairing list, random numbers and config reads work. |
+| `fw maintenance off` | R-config START_UP `0xffffffff` to `0xfffffff7`, backup saved, read back, chip restarted. |
+| ECC | generate P-256 and Ed25519, sign: **OpenSSL verifies both**; generating an occupied slot refused (exit 7); `ecc store` of P-256 and Ed25519 keys made with OpenSSL: **the chip's public keys equal OpenSSL's**; erase; sign with an erased slot: exit 6. |
+| R-MEM | write, read back and `--replace` of 444 and 475 bytes (the larger slot of libtropic 4.2); occupied slot refused (exit 7); erase; read of an erased slot exit 6. |
+| Pairing | `pairing write 1` with a per-unit X25519 key (**one way**): read back correctly, session with the new key opens, a second write is refused. |
+| **R-config takes effect only after a restart** | `config restrict-shared --unit-slot 1`, `config rewrite` (21 objects, backup first) read back correctly. **Before `chip reboot` the shared key still read R-MEM**; after it, the shared key got exit 5 on R-MEM, config and ECC while the unit key worked. `config restore`, `chip reboot`: the shared key has its rights again. |
+| MAC-and-Destroy | `mnd setup` (3 attempts), the right PIN releases the same key each time, a wrong PIN exit 8 ("2 attempt(s) left") and the right PIN still works after it, three wrong PINs leave no attempts and the right PIN is then refused (exit 9). |
+| Counters | uninitialised: exit 6; init 3, three updates reach 0, a fourth is refused by the tool before the chip is asked; 4294967294 accepted; **init can be repeated** (counter 5 went from 0 to 9). |
+| I-config burn | `config burn UAP_PING 31` on firmware 2.2.0: cleared and read back (I-config `0x7fffffff`). |
+
+Not run: `--key pin` on a chip, `pairing invalidate`, the chip's own error for an update at zero (the tool refuses first),
+host-state rollback of the PIN counter on a chip (the model confirmed it). State left on the spare chip: pairing slot 1
+holds a test key, MAC-and-Destroy slots 0 to 2 are used, counters 5 and 6 are initialised, I-config UAP_PING bit 31 is 0.
+
+Consequences for the project: the claim that counters "cannot be reset" was wrong and is corrected in cra-02; an access
+rights change needs `chip reboot` before it protects anything; chips with production provisioning need `--key prod0`.
+
+### Spare chip: PIN-protected pairing key and an access-right trap (2026-10-11)
+
+| Check | Result |
+|---|---|
+| Setup | protected X25519 key written to pairing slot 2 (one way), data in R-MEM slot 50, PIN set with the unit key on MAC-and-Destroy slots 20 to 22, the key sealed under the PIN-released key |
+| `--key pin` | opens a session with the protected key, before and after the R-config was restricted so that only that key may use R-MEM, ECC and counters |
+| After the restart | the unit key and the shared key got exit 5 on R-MEM; `--key pin` with the right PIN read the data; a wrong PIN exit 8; the right PIN worked again afterwards and the attempts stood at 3 of 3 |
+| **Trap found** | restoring the configuration with the unit key failed with `LT_L3_UNAUTHORIZED`: `config dump` also reads the I-config, which needs its own right (`UAP_I_CONFIG_READ`), and the restricted file had given that right to the protected key only. The unit key could still erase and rewrite the R-config, but could not read it first. |
+| Fix | `chip_config_dump` now returns the R-config alone when the I-config may not be read (`config dump` and `config get` say so; `config burn` and `fw update`, which need I-config values, refuse with exit 5); the fake chip models the right. With the fixed build the unit key restored the saved configuration (19 objects, read back); after a chip restart the shared key read R-MEM again. |
+
+Lesson: a restriction file that removes `UAP_I_CONFIG_READ` from the key that has to undo it can lock that key out of
+the restore path (with the old build). Test the undo before relying on a restriction. State left on the spare chip:
+pairing slots 1 and 2 hold test keys whose private halves were deleted, MAC-and-Destroy slots 20 to 22 are used.
+
+## Clean rebuild and flash, old bench chip (2026-10-11)
+
+Image built from a fresh clone of `docs/tropicctl-spec` at `3fad9f9` in the Docker builder with an **empty download
+cache** (123 sources, no hash mismatch, exit 0, no errors); flashed with `sysupgrade` keeping settings; the bench chip
+(RISC-V 0.1.2, SPECT 0.3.1, silicon ABAB, ES01 key) was in the router. OpenVPN was stopped and checked by process ID
+before every chip command.
+
+| Check | Result |
+|---|---|
+| Image | `tropicctl` 0.1.0, `libtropic` 4.2.0, `libtropic-pkcs11` r2, `lt-util` is a symlink to `tropicctl`; `lt-util -i` and `-x -f` work in legacy mode |
+| Read-only `tropicctl` | `fw status`, session with the shared key, `pairing list` (slot 0 only), `rng get`, `mem list` (slots 0 to 2: 299, 299, 383 bytes), `ecc list` (4 keys), `config dump` (54 lines), `info cert` (4), `counter get 0` exit 6, `config burn` refused (firmware older than 2.0.0), `chip reboot` |
+| Vault | init (key in R-MEM slot 100, no plaintext in the image), lock, unlock, `destroy` without its flag refused, `destroy` erased slot 100 and deleted the image, **the old image put back was refused** |
+| OpenVPN with the key in the chip | the module lists the two certificates; the tunnel came up (`tun0` 10.8.0.2), the log shows "signature complete: 64 bytes produced by TROPIC01 hardware", the process holds `/dev/spidev2.0` and `/dev/gpiochip0`, 4 of 4 pings to the gateway (about 6.8 ms); the config has only `pkcs11-providers` and `pkcs11-id` (no `key`, no `cert`) |
+| Found: `sysupgrade` keeps settings but not `/etc/tropic01/` | the keep list has the OpenVPN files and the feature configs, but not the key directory: a vault image, a per-unit pairing key or the `slot0-key` setting does not survive an upgrade (the per-unit key would then lock the unit out of its own chip). Open: a keep.d entry and a note that backups then contain the pairing key. |
+
+Not run here: the console-driven `bench.py suite` (the serial console was silent); the same checks were done over SSH.

@@ -21,9 +21,9 @@ TROPIC01 supports only **one SPI session at a time**. `tropic01-aws-connect` sto
 and then starts the publisher. That is sometimes too short: the publisher's PKCS#11 initialisation then fails with a
 GPIO "resource busy" error, surfaced through `pkcs11-provider` as
 `C_Initialize: Some problem has occurred with the token and/or slot`. Waiting longer, or checking that
-`lt-util -i` succeeds twice in a row before publishing, made this error go away.
+`tropicctl info chip` succeeds twice in a row before publishing, made this error go away.
 
-*Fix to implement:* poll for the chip (retry a cheap read such as `lt-util -i`, with a timeout) instead of sleeping a
+*Fix to implement:* poll for the chip (retry a cheap read such as `tropicctl info chip`, with a timeout) instead of sleeping a
 fixed time.
 
 ### 2. The MQTT connect is rejected after TLS

@@ -21,7 +21,7 @@ define Package/tropic01-vault
   CATEGORY:=Utilities
   TITLE:=CRA Annex I 2(m) encrypted data vault keyed from TROPIC01
   URL:=https://github.com/tropicsquare/tropic01-cra-openwrt
-  DEPENDS:=+lt-util +cryptsetup +kmod-dm +kmod-crypto-xts +kmod-loop +kmod-fs-ext4 +e2fsprogs
+  DEPENDS:=+tropicctl +cryptsetup +kmod-dm +kmod-crypto-xts +kmod-loop +kmod-fs-ext4 +e2fsprogs
 endef
 
 define Package/tropic01-vault/description

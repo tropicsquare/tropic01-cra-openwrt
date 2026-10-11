@@ -48,7 +48,7 @@ on ENGINEERING_SAMPLES_01 hardware, so slot 1 is the first usable one).
 - This OpenWrt tree with the following custom packages already present:
   - `features/core/libtropic` — libtropic base library
   - `features/core/libtropic-pkcs11` — PKCS#11 provider (with patches 001–005)
-  - `features/core/lt-util` — provisioning tool (with patches 001–002)
+  - `features/core/tropicctl` — command-line tool (also installed as `lt-util`)
   - `features/cra-03-key-storage/openvpn` — OpenVPN with PKCS#11 support
 
 ### VPS access
@@ -68,7 +68,7 @@ cd /path/to/openwrt
 # Build the relevant packages
 make package PKG=libtropic
 make package PKG=libtropic-pkcs11
-make package PKG=lt-util
+make package PKG=tropicctl
 make package PKG=openvpn
 
 # Build a full firmware image for your target
@@ -88,7 +88,7 @@ ssh root@<router-ip>
 
 # Prints the chip identification block — there is no separate "connectivity"
 # flag; a successful read is itself the connectivity check.
-lt-util -i
+tropicctl info chip
 ```
 
 Expected output includes lines like:
@@ -111,7 +111,7 @@ Generate a P256 key pair in ECC slot 0. The private key stays inside the chip.
 
 ```bash
 # On the router:
-lt-util -e -g 0        # Generate P256 key in ECC slot 0
+tropicctl ecc generate 0 --curve p256        # Generate P256 key in ECC slot 0
 ```
 
 Expected output:
@@ -127,7 +127,7 @@ Export the 64-byte raw public key (X‖Y coordinates) to a file:
 
 ```bash
 # On the router:
-lt-util -e -d 0 /tmp/tropic_pub.bin
+tropicctl ecc pub 0 --out /tmp/tropic_pub.bin
 ```
 
 Expected output:
@@ -236,7 +236,7 @@ scp root@<VPN_SERVER_IP>:/tmp/${ROUTER}.der /tmp/${ROUTER}.der
 scp /tmp/${ROUTER}.der root@<router-ip>:/tmp/client.der
 
 # Router: write DER to R-MEM slot 1 (ECC slot 0 cert → R-MEM slot 0+1 = 1)
-ssh root@<router-ip> 'lt-util -m -s 1 /tmp/client.der'
+ssh root@<router-ip> 'tropicctl mem write 1 --in /tmp/client.der'
 ```
 
 Expected output:
@@ -387,7 +387,7 @@ ssh root@<router-ip> '/etc/init.d/openvpn restart'
 | `OpenSSL: error:bad signature` on server | Double-hashing | Ensure patch `005-add-ecdsa-sign-prehash.patch` is applied |
 | `Cannot open TUN/TAP dev /dev/net/tun: No such file` | `tun` module not loaded | `modprobe tun` and `echo tun > /etc/modules.d/tun` |
 | `ip link set failed: could not execute external program` | OpenVPN looking for `/usr/sbin/ip` | Add `iproute /sbin/ip` to client config |
-| No cert found in `--show-pkcs11-ids` | Cert not stored / wrong slot | Re-run step 7; verify `lt-util -m -s 1 ...` returned `LT_OK` |
+| No cert found in `--show-pkcs11-ids` | Cert not stored / wrong slot | Re-run step 7; verify `tropicctl mem write 1 --in ...` returned `LT_OK` |
 | TLS handshake timeout (60 s) | Server log shows `bad signature` | Prehash patch missing |
 
 ---
@@ -399,10 +399,10 @@ ROUTER="routerXX"
 ROUTER_IP="<router-ip>"
 
 # 1. Generate hardware key
-ssh root@$ROUTER_IP 'lt-util -e -g 0'
+ssh root@$ROUTER_IP 'tropicctl ecc generate 0' --curve p256
 
 # 2. Export public key
-ssh root@$ROUTER_IP 'lt-util -e -d 0 /tmp/tropic_pub.bin'
+ssh root@$ROUTER_IP 'tropicctl ecc pub 0 --out /tmp/tropic_pub.bin'
 scp root@$ROUTER_IP:/tmp/tropic_pub.bin /tmp/tropic_pub_${ROUTER}.bin
 
 # 3. Build SPKI PEM (run python3 snippet from Step 5, adjust filename)
@@ -421,7 +421,7 @@ ssh root@<VPN_SERVER_IP> "cd /root/easy-rsa && \
 # 5. Store cert in TROPIC01
 scp root@<VPN_SERVER_IP>:/tmp/${ROUTER}.der /tmp/${ROUTER}.der
 scp /tmp/${ROUTER}.der root@$ROUTER_IP:/tmp/client.der
-ssh root@$ROUTER_IP 'lt-util -m -s 1 /tmp/client.der'
+ssh root@$ROUTER_IP 'tropicctl mem write 1 --in /tmp/client.der'
 
 # 6. Deploy VPN files
 scp root@<VPN_SERVER_IP>:/etc/openvpn/ca.crt root@$ROUTER_IP:/etc/openvpn/ca.crt
@@ -459,7 +459,7 @@ ssh root@$ROUTER_IP 'ping -c 3 10.8.0.1'
 
 | File | Purpose |
 |---|---|
-| `/usr/bin/lt-util` | TROPIC01 provisioning tool |
+| `/usr/bin/tropicctl` (and the `lt-util` symlink) | TROPIC01 command-line tool |
 | `/usr/lib/libtropic_pkcs11.so` | PKCS#11 provider (symlink to `.so.spi`) |
 | `/etc/openvpn/ca.crt` | VPN CA certificate |
 | `/etc/openvpn/ta.key` | TLS-crypt pre-shared key |
