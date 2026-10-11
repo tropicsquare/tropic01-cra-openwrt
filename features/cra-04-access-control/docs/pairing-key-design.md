@@ -1,6 +1,6 @@
 # Per-unit pairing key: where it lives and how it is protected
 
-Design draft for backlog items 4.1 to 4.5. **Nothing here is implemented or has been run on a chip.** Statements
+Design for backlog items 4.1 to 4.5. **Status (2026-10-11):** tier 0 is implemented as `tropic01-pairing` on `tropicctl` with sandbox tests, and its steps (pairing write, R-config rewrite with a restart, shared key refused, restore) and the tier-1 PIN session were run on a spare chip; the script itself has not been run on a chip. Answers from those runs are marked *measured*. Statements
 are marked *from the documents* (Tropic Square's PIN Verification Application Note ODN_TR01_app_002 and its
 hardened-authentication example), *from the libtropic 4.2 headers*, or *to verify on a spare chip*. The vendor
 documents are not copied into this repository; read them from Tropic Square.
@@ -129,6 +129,13 @@ complexity and is out of scope until tier 1 exists.
 - Tier 0 does not stop someone who holds the whole unit: the key file is in the flash they hold.
 - Tier 1 protects the pairing key only; everything else on flash stays unencrypted unless backlog 5.4 is done.
 - Side-channel or fault attacks on the chip are the vendor's domain; the scheme's threat model is in the vendor note.
+
+## 9a. Answered on a spare chip (2026-10-11, TROPIC01 firmware 2.2.0)
+
+- *Measured.* The access-object layout (a byte per group of targets, one bit per pairing key) is as the headers say: removing key 0 from every group made the shared key refused (exit 5) on R-MEM, ECC and the configuration while the per-unit key worked.
+- *Measured.* The R-config erase-then-write cycle is safe with `tropicctl` (erase first, read back); a rewritten R-config is **loaded only at the next chip restart**, so a restriction is not in force until `tropicctl chip reboot`.
+- *Measured.* The unit key must keep the right to read the I-config as well, or its configuration dump fails; `tropicctl` now tolerates that, but the shipped restriction only removes key 0 and leaves everything else as it was.
+- *Measured.* Tier 1 works: a protected key in slot 2 opens through `--key pin` (right PIN, wrong PIN, attempts restored), and a restore with the bootstrap key undoes the restriction.
 
 ## 9. Open questions to answer on a spare chip
 

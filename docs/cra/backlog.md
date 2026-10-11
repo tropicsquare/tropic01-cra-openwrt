@@ -140,11 +140,12 @@ Annex I 2(f), 2(c). Design is in [cra-02's README](../../features/cra-02-verifie
 
 ## 4. cra-04 access control (partial)
 
-Annex I 2(d). Software side is done (per-unit key generator, key-file support, read-only slot
-reader, guarded write command); **nothing is provisioned and slot 0 stays valid** by
+Annex I 2(d). Software side is done (per-unit key generator, key-file support, `tropicctl pairing`, and the guarded
+provisioning command `tropic01-pairing` with sandbox tests); **nothing is provisioned on a unit and slot 0 stays valid** by
 decision.
 
-- **4.1 Provision a per-unit pairing key** into slot 1 and read it back. **Irreversible per
+- **4.1 Provision a per-unit pairing key** into slot 1 and read it back. *`tropic01-pairing provision` does it with gates and
+  a verified restriction of the shared key; its steps were run on a spare chip, the script itself not yet.* **Irreversible per
   unit** (a written slot cannot be rewritten; the write goes to I-Memory, which can fail
   silently on old firmware). Use a spare chip first. *S per unit.*
 - **4.2 Invalidate slot 0** (the shared engineering-sample key), only after 4.1 is verified
@@ -153,7 +154,7 @@ decision.
 - **4.3 UAP scoping per slot** (for example a telemetry slot that can sign but not read or
   write R-MEM; a write-restricted slot for log anchors). Test on a spare chip first. *M.*
 - **4.4 Where the host's private pairing key lives.** *A PIN-protected pairing key (tier 1) is implemented in `tropicctl`
-  (`--key pin`, `mnd seal`) and tested against the fake chip; the design is in the cra-04 design draft.* Today a root-only file on flash, so
+  (`--key pin`, `mnd seal`) and was run on a spare chip (hardware report, 2026-10-11); the design is in the cra-04 design draft.* Today a root-only file on flash, so
   root or a flash dump of one unit can open that unit's chip. A stronger home needs encrypted
   storage (5.3, 5.4) or a PIN (5.4). Note the chicken-and-egg: the key must be readable
   before the overlay is unlocked. *M.*

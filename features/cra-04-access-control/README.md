@@ -7,7 +7,7 @@
 | | |
 |---|---|
 | Requirement | CRA Annex I, Part I, 2(d): protection from unauthorised access, authentication |
-| Status | partial: software tooling exists, no unit has been provisioned |
+| Status | partial: provisioning tool and tests exist, no unit has been provisioned |
 | Irreversible step | invalidating pairing slot 0 (needs explicit confirmation, see CLAUDE.md in this folder) |
 
 ## Role of TROPIC01
@@ -53,14 +53,20 @@ invalidated slot 0, so on every unit the shared key still works.
   files they warn (stderr / syslog) and keep the shared engineering-sample
   key, so unprovisioned bench units still work. With key files that are
   present but unusable they **fail**; they never fall back silently.
-- `tropicctl pairing read <slot> --out <file>` reads the public pairing key of a slot
-  (0-3). Read-only; useful to see which slots are populated.
-- `tropicctl pairing write <slot> --in <file> --yes-write-pairing-slot` writes a 32-byte public key
-  into an empty slot 1-3 and reads it back. It refuses slot 0, a non-empty
-  slot, a file that is not 32 bytes, and any call without the literal
-  `--irreversible`. Run it with `LT_UTIL_FORCE_SHARED_KEY=1` so the session
-  uses the shared key. **It has been built but never run against a chip**, and
-  nothing in this repo calls it.
+- `tropicctl pairing read <slot> --out <file>` reads the public pairing key of a slot (0-3), read-only.
+- `tropicctl pairing write <slot> --in <file> --yes-write-pairing-slot` writes a 32-byte public key into an empty
+  slot 1-3 and reads it back; it refuses slot 0 and a slot that is not empty. One way. Run on a spare chip (see below).
+- **`tropic01-pairing`** (`tropic01-pairing/`, a package of this feature) runs the whole tier-0 provisioning on top of
+  `tropicctl`: `status`, `provision`, `undo`. Every chip write is off by default and has its own flag
+  (`--yes-write-pairing-slot`, `--yes-rewrite-r-config`). It refuses chip firmware older than 2.0.0 (I-Memory writes can fail
+  silently there), writes the unit's public key into its slot and reads it back, proves the per-unit key opens a session,
+  then rewrites the R-config so the shared slot-0 key loses its rights (erase before write, first configuration saved in
+  `/etc/tropic01/rconfig-before.cfg`), restarts the chip (it loads its R-config at start-up), and checks that the shared key
+  is refused and the per-unit key works; if not it restores the saved configuration. **Slot 0 is restricted, not
+  invalidated.** The sandbox test (`tests/sandbox/pairing.sh`, 63 checks against the real `tropicctl` with its fake chip)
+  covers the gates; the steps it is built from were each run on a spare chip, **the script itself has not yet been run on a chip.**
+- `/etc/tropic01/` is on the `sysupgrade` keep list (from the `tropicctl` package), so an upgrade that keeps settings keeps
+  the per-unit key. A settings backup then contains the private pairing key: treat backups as credentials.
 
 ## Current decision (2026-10-05)
 
