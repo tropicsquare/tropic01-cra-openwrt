@@ -59,7 +59,8 @@ typedef struct {
 typedef struct {
 	char name[CHIP_NAME_LEN];
 	uint32_t r_value;
-	uint32_t i_value;
+	uint32_t i_value; /* meaningful only when i_known */
+	int i_known;      /* 0: the key of the session may not read the I-config (UAP_I_CONFIG_READ); the R-config is still valid */
 } chip_config_obj_t;
 
 chip_status_t chip_open(const chip_cfg_t *cfg, chip_t **out, char *err);

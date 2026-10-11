@@ -203,3 +203,17 @@ holds a test key, MAC-and-Destroy slots 0 to 2 are used, counters 5 and 6 are in
 
 Consequences for the project: the claim that counters "cannot be reset" was wrong and is corrected in cra-02; an access
 rights change needs `chip reboot` before it protects anything; chips with production provisioning need `--key prod0`.
+
+### Spare chip: PIN-protected pairing key and an access-right trap (2026-10-11)
+
+| Check | Result |
+|---|---|
+| Setup | protected X25519 key written to pairing slot 2 (one way), data in R-MEM slot 50, PIN set with the unit key on MAC-and-Destroy slots 20 to 22, the key sealed under the PIN-released key |
+| `--key pin` | opens a session with the protected key, before and after the R-config was restricted so that only that key may use R-MEM, ECC and counters |
+| After the restart | the unit key and the shared key got exit 5 on R-MEM; `--key pin` with the right PIN read the data; a wrong PIN exit 8; the right PIN worked again afterwards and the attempts stood at 3 of 3 |
+| **Trap found** | restoring the configuration with the unit key failed with `LT_L3_UNAUTHORIZED`: `config dump` also reads the I-config, which needs its own right (`UAP_I_CONFIG_READ`), and the restricted file had given that right to the protected key only. The unit key could still erase and rewrite the R-config, but could not read it first. |
+| Fix | `chip_config_dump` now returns the R-config alone when the I-config may not be read (`config dump` and `config get` say so; `config burn` and `fw update`, which need I-config values, refuse with exit 5); the fake chip models the right. With the fixed build the unit key restored the saved configuration (19 objects, read back); after a chip restart the shared key read R-MEM again. |
+
+Lesson: a restriction file that removes `UAP_I_CONFIG_READ` from the key that has to undo it can lock that key out of
+the restore path (with the old build). Test the undo before relying on a restriction. State left on the spare chip:
+pairing slots 1 and 2 hold test keys whose private halves were deleted, MAC-and-Destroy slots 20 to 22 are used.

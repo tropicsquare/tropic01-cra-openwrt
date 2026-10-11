@@ -115,3 +115,20 @@ check_contains "tells the user to run it again" "run the update again" "$(cat er
 check_contains "and the chip still runs what it ran" "RISC-V firmware 0.1.2" "$(T fw status 2>/dev/null)"
 check "an update that reports success but changes nothing: exit 8" 8 "$(TROPICCTL_FAKE_FWUPDATE_SILENT=1 rc fw update --dir img220 --yes-update-firmware)"
 check_contains "and says what the chip runs" "the chip runs RISC-V 0.1.2" "$(cat err.txt)"
+
+echo "# a key that may read and rewrite the R-config but not read the I-config"
+# [measured 2026-10-11, spare chip] config dump reads both; a key without UAP_I_CONFIG_READ was refused. The tool now shows the
+# R-config alone, so such a key can still back up and restore the configuration.
+fresh; setkey 1
+T --key unit config dump 2>/dev/null | grep '^R ' > full.cfg
+sed -i 's/^TR01_CFG_UAP_I_CONFIG_READ .*/TR01_CFG_UAP_I_CONFIG_READ 0xfffffff4/' chip/rconfig
+check "config dump works without the I-config right" 0 "$(rc --key unit config dump)"
+check "it shows the R-config" 27 "$(grep -c '^R ' out.txt)"
+check "and no I-config lines" 0 "$(grep -c '^I ' out.txt)"
+check_contains "and says why" "UAP_I_CONFIG_READ" "$(cat err.txt)"
+check "--json: i_config is null" valid "$(T --key unit --json config dump > j.txt 2>/dev/null; grep -q '"i_config":null' j.txt && json_ok j.txt)"
+check "config get shows R only" 0 "$(rc --key unit config get START_UP)"
+check "config restore works with such a key" 0 "$(rc --key unit config restore --in full.cfg --yes-rewrite-r-config --backup bki.cfg)"
+echo "00000002 00000100" > chip/fw
+sed -i 's/^TR01_CFG_UAP_I_CONFIG_READ .*/TR01_CFG_UAP_I_CONFIG_READ 0xfffffff4/' chip/rconfig
+check "config burn without the right to read the I-config: exit 5" 5 "$(rc --key unit config burn UAP_PING 3 --yes-burn-i-config-bit)"

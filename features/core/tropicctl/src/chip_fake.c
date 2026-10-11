@@ -437,12 +437,16 @@ chip_status_t chip_config_dump(chip_t *c, chip_config_obj_t objs[CHIP_CONFIG_OBJ
 {
 	chip_status_t st = allowed(c, "TR01_CFG_UAP_R_CONFIG_READ", err);
 	if (st) return st;
-	st = allowed(c, "TR01_CFG_UAP_I_CONFIG_READ", err);
-	if (st) return st;
+	/* [measured 2026-10-11, spare chip] reading the I-config needs its own right; without it the read is refused (exit 5) */
+	{
+		char dummy[CHIP_ERRLEN];
+		int i_ok = allowed(c, "TR01_CFG_UAP_I_CONFIG_READ", dummy) == CHIP_OK;
+		for (int i = 0; i < CHIP_CONFIG_OBJ_CNT; i++) objs[i].i_known = i_ok;
+	}
 	for (int i = 0; i < CHIP_CONFIG_OBJ_CNT; i++) {
 		snprintf(objs[i].name, CHIP_NAME_LEN, "%s", CFG_NAMES[i]);
 		objs[i].r_value = cfg_word(c, "rconfig", CFG_NAMES[i]);
-		objs[i].i_value = cfg_word(c, "iconfig", CFG_NAMES[i]);
+		objs[i].i_value = objs[i].i_known ? cfg_word(c, "iconfig", CFG_NAMES[i]) : 0xffffffffu;
 	}
 	return CHIP_OK;
 }

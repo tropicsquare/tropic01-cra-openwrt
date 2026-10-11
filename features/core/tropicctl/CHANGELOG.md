@@ -11,6 +11,7 @@ Phases 1 to 4 of [SPEC.md](SPEC.md).
   `mnd setup|check|status|seal|unseal`, `counter get|init|update`, `session test`, `help`, `version`.
 - Safety classes R, W, I, H; confirmation flags named per operation; every write read back; the R-config is only ever
   written by erasing first; the PIN attempt count is saved before the chip is touched.
+- `config dump` and `config get` show the R-config alone when the key has no right to read the I-config; `config restore` works with such a key.
 - `--key pin`: a pairing key protected by a PIN (MAC-and-Destroy), opened with a bootstrap key.
 - `chip reboot`: restart the chip. The chip loads its R-config at start-up, so a rewritten R-config (config rewrite,
   config restore) is not in force until a restart; the fake chip models this.

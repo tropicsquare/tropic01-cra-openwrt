@@ -173,16 +173,18 @@ chip_status_t chip_config_dump(chip_t *c, chip_config_obj_t objs[CHIP_CONFIG_OBJ
 	struct lt_config_t r = {{0}}, i = {{0}};
 	chip_status_t st = map(lt_read_whole_R_config(&c->h, &r), err);
 	if (st != CHIP_OK) return st;
+	/* a key without UAP_I_CONFIG_READ can still read and rewrite the R-config: report the R-config alone then */
 	st = map(lt_read_whole_I_config(&c->h, &i), err);
-	if (st != CHIP_OK) return st;
+	if (st != CHIP_OK && st != CHIP_E_DENIED) return st;
 	for (int k = 0; k < CHIP_CONFIG_OBJ_CNT; k++) {
+		objs[k].i_known = st == CHIP_OK;
 		size_t n = strlen(cfg_desc_table[k].desc);
 		while (n > 0 && cfg_desc_table[k].desc[n - 1] == ' ') n--;
 		if (n >= CHIP_NAME_LEN) n = CHIP_NAME_LEN - 1;
 		memcpy(objs[k].name, cfg_desc_table[k].desc, n);
 		objs[k].name[n] = '\0';
 		objs[k].r_value = r.obj[k];
-		objs[k].i_value = i.obj[k];
+		objs[k].i_value = st == CHIP_OK ? i.obj[k] : 0xffffffffu;
 	}
 	return CHIP_OK;
 }

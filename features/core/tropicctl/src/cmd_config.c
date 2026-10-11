@@ -33,16 +33,22 @@ int cmd_config_dump(ctx_t *x, args_t *a)
 	if (g_json) {
 		printf("{\"r_config\":[");
 		for (int i = 0; i < CHIP_CONFIG_OBJ_CNT; i++) printf("%s{\"name\":\"%s\",\"value\":\"0x%08x\"}", i ? "," : "", o[i].name, o[i].r_value);
-		printf("],\"i_config\":[");
-		for (int i = 0; i < CHIP_CONFIG_OBJ_CNT; i++) printf("%s{\"name\":\"%s\",\"value\":\"0x%08x\"}", i ? "," : "", o[i].name, o[i].i_value);
-		printf("]}\n");
+		printf("],\"i_config\":");
+		if (!o[0].i_known) printf("null");
+		else {
+			printf("[");
+			for (int i = 0; i < CHIP_CONFIG_OBJ_CNT; i++) printf("%s{\"name\":\"%s\",\"value\":\"0x%08x\"}", i ? "," : "", o[i].name, o[i].i_value);
+			printf("]");
+		}
+		printf("}\n");
 		return TC_OK;
 	}
 	for (int i = 0; i < CHIP_CONFIG_OBJ_CNT; i++) {
 		printf("R %s 0x%08x\n", o[i].name, o[i].r_value);
 		if (decode) uap_describe(stdout, o[i].name, o[i].r_value);
 	}
-	for (int i = 0; i < CHIP_CONFIG_OBJ_CNT; i++) {
+	if (!o[0].i_known) out_warn("the I-config is not shown: this key has no right to read it (UAP_I_CONFIG_READ)");
+	for (int i = 0; i < CHIP_CONFIG_OBJ_CNT && o[0].i_known; i++) {
 		printf("I %s 0x%08x\n", o[i].name, o[i].i_value);
 		if (decode) uap_describe(stdout, o[i].name, o[i].i_value);
 	}
@@ -61,8 +67,14 @@ int cmd_config_get(ctx_t *x, args_t *a)
 	if ((rc = read_objs(x, o))) return rc;
 	i = cfg_find(o, a->argv[0]);
 	if (i < 0) return out_error(TC_NOTFOUND, "no configuration object named %s (see: tropicctl config dump)", a->argv[0]);
-	if (g_json) printf("{\"name\":\"%s\",\"r\":\"0x%08x\",\"i\":\"0x%08x\"}\n", o[i].name, o[i].r_value, o[i].i_value);
-	else printf("R %s 0x%08x\nI %s 0x%08x\n", o[i].name, o[i].r_value, o[i].name, o[i].i_value);
+	if (g_json) {
+		if (o[i].i_known) printf("{\"name\":\"%s\",\"r\":\"0x%08x\",\"i\":\"0x%08x\"}\n", o[i].name, o[i].r_value, o[i].i_value);
+		else printf("{\"name\":\"%s\",\"r\":\"0x%08x\",\"i\":null}\n", o[i].name, o[i].r_value);
+	} else {
+		printf("R %s 0x%08x\n", o[i].name, o[i].r_value);
+		if (o[i].i_known) printf("I %s 0x%08x\n", o[i].name, o[i].i_value);
+		else out_warn("the I-config is not shown: this key has no right to read it (UAP_I_CONFIG_READ)");
+	}
 	return TC_OK;
 }
 
@@ -228,6 +240,7 @@ int cmd_config_burn(ctx_t *x, args_t *a)
 	if (rv[3] < 2)
 		return out_error(TC_REFUSED, "the CPU firmware is %u.%u.%u, older than 2.0.0; firmware older than 2.0.0 can fail I-Memory writes silently", rv[3], rv[2], rv[1]);
 	if ((rc = read_objs(x, o))) return rc;
+	if (!o[0].i_known) return out_error(TC_DENIED, "this key cannot read the I-config (UAP_I_CONFIG_READ), so the bit cannot be checked or read back");
 	i = cfg_find(o, a->argv[0]);
 	if (i < 0) return out_error(TC_NOTFOUND, "no configuration object named %s", a->argv[0]);
 	if (!((o[i].i_value >> bit) & 1u)) {

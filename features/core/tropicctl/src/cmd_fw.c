@@ -242,6 +242,7 @@ int cmd_fw_update(ctx_t *x, args_t *a)
 	if ((rc = ctx_session(x))) return rc;
 	st = chip_config_dump(x->chip, o, err);
 	if (st != CHIP_OK) return out_chip_error(st, "cannot read the configuration", err);
+	if (!o[0].i_known) return out_error(TC_DENIED, "this key cannot read the I-config (UAP_I_CONFIG_READ), so Maintenance Mode cannot be checked");
 	if (!(o[0].i_value & MAINT_BIT))
 		return out_error(TC_REFUSED, "Maintenance Mode is disabled in the I-config (irreversible), so this chip cannot be updated");
 	if (!(o[0].r_value & MAINT_BIT) && !enable)
