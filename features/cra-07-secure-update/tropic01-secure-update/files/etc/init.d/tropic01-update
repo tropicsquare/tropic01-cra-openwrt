@@ -1,0 +1,9 @@
+#!/bin/sh /etc/rc.common
+# Raise the rollback floor to the security version of the image that is now running. Runs late in boot, so only an image
+# that boots this far raises it, and before OpenVPN (S90) takes the chip.
+# shellcheck disable=SC2034  # read by /etc/rc.common
+START=86
+
+boot() {
+	/usr/sbin/tropic01-update commit || logger -t tropic01-update "commit failed; the floor stays where it was"
+}

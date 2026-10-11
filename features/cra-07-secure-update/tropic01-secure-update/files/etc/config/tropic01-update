@@ -1,0 +1,8 @@
+config tropic01-update 'main'
+	# 1: refuse unsigned images, images not signed under a root key held in TROPIC01, and rollbacks
+	option enforce '1'
+	# R-MEM slots that hold the update root public keys (usign format)
+	option key_slots '200 201'
+	# monotonic counter used for the rollback floor (floor = start - counter value)
+	option counter '0'
+	option start '1000'

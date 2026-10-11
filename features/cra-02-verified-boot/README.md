@@ -1,6 +1,8 @@
 # cra-02-verified-boot — firmware integrity and rollback protection
 
-**CRA Annex I, Part I, 2(f) and 2(c). Status: not started.**
+**CRA Annex I, Part I, 2(f). Status: not started.** Scope since 2026-10-11: secure boot only. Signed `sysupgrade` and
+rollback protection are their own feature, [cra-07-secure-update](../cra-07-secure-update/). Whether this board's boot ROM
+can verify a signature at all (eFuses, a signed first stage) is the first thing to find out; nothing below assumes it.
 
 ## At a glance
 

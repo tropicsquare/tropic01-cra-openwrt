@@ -2,7 +2,7 @@
 # Run every sandbox test. Exit non-zero if any fails.
 cd "$(dirname "$0")" || exit 1
 rc=0
-for t in audit.sh recorder.sh vault.sh pairing.sh; do
+for t in audit.sh recorder.sh vault.sh pairing.sh secure-update.sh; do
 	echo "=== $t"
 	./"$t" || rc=1
 done
