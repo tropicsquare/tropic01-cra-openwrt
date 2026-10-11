@@ -118,6 +118,7 @@ cmd_check() {
 	rc=0
 	floor="$(floor_value)" || rc=$?
 	[ "$rc" -eq 6 ] && die "rollback counter $COUNTER is not initialised: run tropic01-update floor init first"
+	if [ "$rc" -ne 0 ] || ! is_number "$floor"; then die "cannot read the rollback floor (counter $COUNTER)"; fi
 	[ "$sv" -ge "$floor" ] || die "security version $sv is below this unit's floor $floor: refusing a rollback"
 	log "accepted: signed by a root held in TROPIC01, security version $sv (floor $floor)"
 }
@@ -130,6 +131,8 @@ cmd_commit() {
 	rc=0
 	floor="$(floor_value)" || rc=$?
 	[ "$rc" -eq 6 ] && { log "rollback counter $COUNTER is not initialised; nothing to commit"; return 0; }
+	# never count down on a floor that could not be read: an empty value would make every step a decrement
+	if [ "$rc" -ne 0 ] || ! is_number "$floor"; then die "cannot read the rollback floor (counter $COUNTER); nothing changed"; fi
 	[ "$sv" -le "$floor" ] && { log "floor $floor, running image $sv: nothing to raise"; return 0; }
 	[ "$sv" -le "$START" ] || die "security version $sv is above the counter's range (start $START)"
 	steps=$((sv - floor))

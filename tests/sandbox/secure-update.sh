@@ -119,6 +119,23 @@ check "a security version above the counter's range is an error" 1 "$(run commit
 rm -f image-sv
 check "no security version in the running image: nothing to commit" 0 "$(run commit)"
 
+echo "# a floor that cannot be read is never counted down on"
+cat > "$WORK/getfail" <<'EOF2'
+#!/bin/sh
+# tropicctl whose counter read is refused (exit 5) while everything else works
+[ "$1 $2" = "counter get" ] && { echo "tropicctl: error: cannot read the counter: LT_L3_UNAUTHORIZED" >&2; exit 5; }
+exec "$REAL_TC" "$@"
+EOF2
+chmod +x "$WORK/getfail"
+before="$(T counter get 0 2>/dev/null)"
+echo 9 > image-sv
+check "commit with an unreadable floor: refused" 1 "$(REAL_TC="$BIN" TROPIC01_UPDATE_TROPICCTL="$WORK/getfail" run commit)"
+check_contains "and says nothing changed" "nothing changed" "$(cat err.txt)"
+check "the counter was not touched" "$before" "$(T counter get 0 2>/dev/null)"
+check "check with an unreadable floor: refused, with the right reason" 1 "$(REAL_TC="$BIN" TROPIC01_UPDATE_TROPICCTL="$WORK/getfail" run check img7)"
+check_contains "the reason" "cannot read the rollback floor" "$(cat err.txt)"
+rm -f image-sv
+
 echo "# a second root (planned root change)"
 check "install the other root in slot 201" 0 "$(run keys install 201 keys/root2.pub --yes-write-update-key)"
 check "an image under the second root is accepted" 0 "$(run check foreign)"
