@@ -140,6 +140,69 @@ int cmd_config_restrict_shared(ctx_t *x, args_t *a)
 	return TC_OK;
 }
 
+/*
+ * config deny (R): offline. Copies a configuration file (R lines, as config dump or restrict-shared write them) and removes
+ * one pairing key from the named access objects, in every group of targets. "all" names every access object. Nothing is
+ * read from or written to the chip; the result is applied with config rewrite, which keeps its own guards.
+ */
+int cmd_config_deny(ctx_t *x, args_t *a)
+{
+	const cmd_t *c = cmd_find("config", "deny");
+	const char *in = NULL, *out = NULL, *key = NULL, *bad;
+	char line[256], name[CHIP_NAME_LEN + 16], want[64][CHIP_NAME_LEN + 16];
+	unsigned v;
+	long k;
+	int nwant = 0, all = 0, changed = 0, seen[64] = {0};
+	FILE *fi, *fo;
+	(void)x;
+	if (args_value(a, "--in", &in) <= 0) return cmd_usage(c, "--in FILE is required");
+	if (args_value(a, "--out", &out) <= 0) return cmd_usage(c, "--out FILE is required");
+	if (args_value(a, "--pairing-key", &key) <= 0 || !args_number(key, 0, 3, &k)) return cmd_usage(c, "--pairing-key 0-3 is required");
+	if (args_unknown(a, &bad)) return cmd_usage(c, bad);
+	if (a->argc < 1) return cmd_usage(c, "name at least one access object (for example MCOUNTER_INIT), or all");
+	for (int i = 0; i < a->argc; i++) {
+		char *list = a->argv[i], *tok, *save = NULL;
+		for (tok = strtok_r(list, ",", &save); tok; tok = strtok_r(NULL, ",", &save)) {
+			if (strcmp(tok, "all") == 0) { all = 1; continue; }
+			if (nwant >= 64) return cmd_usage(c, "too many names");
+			/* accept MCOUNTER_INIT, UAP_MCOUNTER_INIT or TR01_CFG_UAP_MCOUNTER_INIT */
+			snprintf(want[nwant], sizeof want[nwant], "%s%s", strncmp(tok, "TR01_CFG_", 9) == 0 ? "" : strncmp(tok, "UAP_", 4) == 0 ? "TR01_CFG_" : "TR01_CFG_UAP_", tok);
+			if (uap_kind(want[nwant]) == UAP_NONE) return out_error(TC_USAGE, "%s is not an access object", tok);
+			nwant++;
+		}
+	}
+	if (!(fi = fopen(in, "r"))) return out_error(TC_USAGE, "cannot read %s", in);
+	if (!(fo = fopen(out, "w"))) {
+		fclose(fi);
+		return out_error(TC_INTERNAL, "cannot write %s", out);
+	}
+	fprintf(fo, "# tropicctl config deny --pairing-key %ld: copy of %s with pairing key %ld removed from %s\n", k, in, k, all ? "every access object" : "the named access objects");
+	while (fgets(line, sizeof line, fi)) {
+		uint32_t w;
+		int hit = all, i;
+		if (sscanf(line, "R %47s 0x%x", name, &v) != 2) continue; /* comments, I lines and blank lines are not carried over */
+		w = v;
+		for (i = 0; i < nwant; i++)
+			if (strcmp(name, want[i]) == 0) { hit = 1; seen[i] = 1; }
+		if (hit && uap_kind(name) != UAP_NONE) {
+			uint32_t nw = uap_clear_key(w, uap_kind(name), (int)k);
+			if (nw != w) {
+				changed++;
+				printf("%s 0x%08x -> 0x%08x\n", name, w, nw);
+			}
+			w = nw;
+		}
+		fprintf(fo, "R %s 0x%08x\n", name, w);
+	}
+	fclose(fi);
+	if (fclose(fo) != 0) return out_error(TC_INTERNAL, "cannot write %s", out);
+	for (int i = 0; i < nwant; i++)
+		if (!seen[i]) return out_error(TC_NOTFOUND, "%s is not in %s", want[i], in);
+	out_notice("%d access object(s) changed for pairing key %ld; review with: tropicctl config diff --in %s; apply with: tropicctl config rewrite --in %s --yes-rewrite-r-config",
+	           changed, k, out, out);
+	return TC_OK;
+}
+
 static void stamp(char *buf, size_t n)
 {
 	time_t t = time(NULL);

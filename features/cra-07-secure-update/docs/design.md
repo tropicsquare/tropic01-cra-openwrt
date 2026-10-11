@@ -43,18 +43,26 @@ A refusal marks the image **broken**, which `sysupgrade -F` cannot override.
 Commit (at boot, after the new image runs): if the pending record matches the running image (`DISTRIB_REVISION`), the
 counter is decremented until `floor = SV`. A failed upgrade never raises the floor; only a booted image does.
 
-## 3. Why the root key in TROPIC01
+## 3. What TROPIC01 really adds here
 
-| Property | Root public key in `/etc/opkg/keys` (flash) | Root public key in TROPIC01 R-MEM |
+**What it does not add.** The signature check (`ucert`) works the same with the root key in the root filesystem. A
+network attacker sending a bad image is stopped by the signature wherever the key is kept. Someone who writes the flash
+directly bypasses `sysupgrade` altogether (only secure boot, cra-02, stops that). And today root on the running router can
+switch the check off, rewrite the key slots and re-initialise the counter, because the device's pairing key holds those
+chip rights, and its private half is on the same flash.
+
+| Property | Floor and root key on flash | In TROPIC01 |
 |---|---|---|
-| A factory reset or a reflash replaces it | yes | no: it stays with the chip |
-| A settings backup put back can replace it | yes | no |
-| Someone who writes the flash offline can replace it | yes | no (needs a session with a key that may write R-MEM) |
-| Root on the running router can replace it | yes | yes, while the device key may write R-MEM (see 5) |
-| Secret? | no | no (public key; anyone with a session can read it) |
+| Survive a factory reset, an overlay wipe, a settings restore, a reflash through `sysupgrade` | no (overlay), or only in a dedicated partition | **yes**: they stay with the chip |
+| The floor only goes up | a software rule; any flash write can lower it | **enforced by the chip** (the counter only decrements), except through `counter init` |
+| The root key belongs to the unit, not to the image | no: every image brings its own keys | **yes**: rotation and per-owner roots without new images |
+| Root on the router (or someone holding the flash) can lower the floor or replace the root key | yes | **yes today; no once the device key loses those rights** (section 7) |
+| Secret? | no | no (public key; the counter is readable) |
 
-The **counter** is the part only the chip gives: the rollback floor is not stored on flash, so restoring an old overlay or
-reflashing through the update path cannot lower it.
+So the value is: (1) **a rollback floor that a reset cannot undo**, which works today: a unit that was reset or restored
+still refuses older signed images; (2) **a floor and a root key that software on the device cannot change**, which needs
+section 7 and is the one thing flash storage cannot offer; (3) per-owner roots, an operational feature. Without section 7
+the root key in R-MEM is no stronger than a key in a dedicated flash partition, and the docs must not say otherwise.
 
 TROPIC01 does **not** verify the signature (it has no verify command); `ucert` on the router does.
 
@@ -93,3 +101,31 @@ TROPIC01 does **not** verify the signature (it has no verify command); `ucert` o
 3. **Spare chip:** root key in R-MEM, counter initialised, signed image accepted, tampered and older images refused, commit
    after boot.
 4. Later: the release key inside a TROPIC01 on the build side; the R-MEM write right moved off the device key (cra-04).
+
+## 7. Least privilege for the device key (backlog 10.6)
+
+The chip decides per pairing key which commands it may run (*measured*: the access objects work as libtropic describes; a
+rewritten R-config takes effect after a chip restart). The device's runtime key (its private half on the router's flash)
+should keep only what the running system needs:
+
+| Right | Runtime key | Why |
+|---|---|---|
+| R-MEM read, ECC read and sign, random, counter get, ping | keep | the vault opens, OpenVPN signs, the update check reads keys and floor |
+| counter update | keep | the boot commit raises the floor (it can only go up) |
+| **counter init** | **remove** | the only way to lower the floor |
+| **R-config write and erase** | **remove** | otherwise any removed right can be given back |
+| **I-config write** | **remove** | |
+| **pairing key write and invalidate** | **remove** | otherwise root writes its own key into a free slot and uses that key's rights |
+| ECC generate, store, erase | remove after enrolment | only needed when the VPN identity is created |
+| R-MEM write and erase | **decision** | needed by the vault (init, destroy) and to install update keys; R-MEM rights cover every slot at once, so keeping them leaves the root key slots writable |
+
+Every pairing slot that holds no key gets no rights at all (a key written into it later would otherwise inherit them).
+
+**Who can still change anything:** an **owner key** in another pairing slot, with every right, whose private half is not on
+the router (kept by the operator, brought in only for maintenance). Without an owner key, removing the configuration rights
+is effectively permanent. Burning the same bits in the I-config makes it permanent on purpose (one-way, firmware 2.0.0 or
+newer, read back).
+
+Open decisions before any chip step: R-MEM write on the runtime key (keep, or move vault init/destroy and key installation
+to the owner key); the owner key's slot and custody; reversible (R-config) or permanent (I-config); which chip to test on
+(the spare chip has no free pairing slot left).

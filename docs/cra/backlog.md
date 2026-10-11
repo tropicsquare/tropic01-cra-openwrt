@@ -304,7 +304,9 @@ Annex I 2(c), 2(f) for the update path. Design: [cra-07 design](../../features/c
 - **10.4 Certificate validity and the clock.** `ucert` certificates expire (one year by default); the router's clock is wrong
   until NTP. Decide the validity policy. *S.*
 - **10.5 Revocation.** How `ucert -R` records a revoked release key, and keeping that state in the chip. *S-M.*
-- **10.6 Narrow who may write the root key slots and initialise the counter** (cra-04 key split, then optionally I-config). *M.*
+- **10.6 Narrow who may write the root key slots and initialise the counter** (cra-04 key split, then optionally I-config).
+  *Designed (cra-07 design, section 7); `tropicctl config deny` builds the restricted configuration.* Open: the decisions in
+  section 7 (R-MEM write, owner key slot and custody, reversible or permanent, which chip) and a chip run. *M.*
 - **10.7 Release key inside a TROPIC01 on the build side.** *M.*
 - **10.8 CI.** Build OpenWrt's `usign`, `ucert` and `fwtool` in CI so `secure-update.sh` runs there instead of skipping. *S.*
 
