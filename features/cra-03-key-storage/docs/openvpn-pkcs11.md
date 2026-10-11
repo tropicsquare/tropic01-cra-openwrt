@@ -74,7 +74,7 @@ interactively instead:
 make menuconfig
 # Libraries             → libtropic
 # Libraries             → libtropic-pkcs11
-# Libraries             → tropicctl
+# Utilities             → tropicctl
 # Libraries             → pkcs11-helper
 # Network → VPN         → openvpn-openssl
 ```
@@ -97,12 +97,14 @@ CMAKE_OPTIONS += \
 Change `TS_SPI_DEV`, `TS_GPIO_DEV`, or `TS_GPIO_CS_PIN` here if your board uses
 a different SPI bus or GPIO pin.
 
-> **`LT_SH0_KEYS=eng_sample`** — required for **ENGINEERING_SAMPLES_01** silicon.
-> Production chips need different pairing keys in the `libtropic` package.
+> **`LT_SH0_KEYS=eng_sample`** is only the default. The slot-0 key is chosen at run time
+> (patch 009): `es01` or `prod0` from `/etc/tropic01/slot0-key` (or `$TROPICCTL_SH0`).
+> A chip with production provisioning needs `prod0`.
 
 ### 1.4 Applied patches
 
-Five patches are applied to the upstream `libtropic-pkcs11` source:
+These patches (in `features/core/libtropic-pkcs11/patches/`) are applied to the upstream
+`libtropic-pkcs11` source:
 
 | Patch | What it does |
 |---|---|
@@ -110,13 +112,16 @@ Five patches are applied to the upstream `libtropic-pkcs11` source:
 | `002-use-spi-device-structure.patch` | Passes SPI/GPIO device paths via CMake defines |
 | `003-use-engineering-sample-keys.patch` | Selects ES01 pairing keys |
 | `004-add-cko-certificate-from-r-mem.patch` | Reads client X.509 cert from R-MEM slot at PKCS#11 token init |
-| `005-add-ecdsa-sign-prehash.patch` | Adds `lt_ecc_ecdsa_sign_prehash()` so OpenVPN's `CKM_ECDSA` gets a pre-hashed input (fixes double-hashing) |
+| `006-add-syslog-tracing.patch` | Traces module calls to syslog |
+| `007-load-per-unit-pairing-key.patch` | Uses the per-unit pairing key from `/etc/tropic01/pairing.*` when present |
+| `008-port-to-libtropic-4.2.patch` | Builds against libtropic 4.2; passes OpenVPN's 32-byte hash to `lt_ecc_ecdsa_sign()`, which does not hash again |
+| `009-select-slot0-key-at-runtime.patch` | Chooses the slot-0 key (`es01` or `prod0`) at run time |
 
 ### 1.5 Compile and build image
 
-```bash
-cd /path/to/openwrt
+From the repository root:
 
+```bash
 # Build individual packages
 make package PKG=libtropic
 make package PKG=libtropic-pkcs11
@@ -125,7 +130,7 @@ make package PKG=pkcs11-helper
 make package PKG=openvpn
 
 # Or build the full firmware image
-make -j$(nproc)
+make build
 ```
 
 Flash the resulting `bin/targets/mediatek/filogic/*-sysupgrade.bin` to the
@@ -143,7 +148,7 @@ All provisioning steps run **on the router** over SSH.
 tropicctl info chip
 ```
 
-`-i` prints the chip identification block (no separate "connectivity" flag
+`tropicctl info chip` prints the chip identification block (no separate "connectivity" flag
 exists); a successful read confirms SPI/GPIO wiring and the pairing keys
 both work. Expected output includes lines like:
 ```
@@ -154,7 +159,7 @@ Batch ID               = 0x0000FFFFFF
 | Error | Cause | Fix |
 |---|---|---|
 | `LT_L2_SPI_ERROR` | Bad wiring or wrong SPI device | Check `/dev/spidev2.0`, CS GPIO pin 25 |
-| `LT_HOST_SECURE_CHANNEL_SETUP` | Wrong pairing keys | Rebuild with `LT_SH0_KEYS=eng_sample` |
+| `LT_HOST_SECURE_CHANNEL_SETUP` | Wrong pairing key | Set `es01` or `prod0` in `/etc/tropic01/slot0-key`; a provisioned unit needs `/etc/tropic01/pairing.*` |
 | `GPIO_V2_GET_LINE_IOCTL error! ... Resource busy` | Another process (usually OpenVPN) already holds the SPI/GPIO session — TROPIC01 supports only one active session at a time | Stop the other consumer first (`/etc/init.d/openvpn stop`) |
 
 ### 2.2 Generate the hardware key
@@ -165,7 +170,7 @@ tropicctl ecc generate 0 --curve p256        # Generate P-256 key in ECC slot 0
 
 Expected:
 ```
-INFO    lt_ecc_key_generate() : LT_OK
+ecc slot 0: generated a p256 key; public key <hex>
 ```
 
 The private key is generated inside TROPIC01 and **cannot be exported**.
@@ -174,14 +179,10 @@ The private key is generated inside TROPIC01 and **cannot be exported**.
 
 ```bash
 tropicctl ecc pub 0 --out /tmp/tropic_pub.bin
+wc -c /tmp/tropic_pub.bin   # 64
 ```
 
-Expected:
-```
-Curve: P256
-Number of elements written: 64
-```
-
+`ecc pub` with `--out` prints nothing; check that the file is 64 bytes.
 This writes the 64-byte raw X‖Y coordinates (no `0x04` prefix). Copy to your
 build host for certificate signing:
 
@@ -286,10 +287,10 @@ ssh root@<router-ip> 'tropicctl mem write 1 --in /tmp/client.der'
 
 Expected:
 ```
-INFO    lt_r_mem_data_write(): LT_OK
+slot 1: wrote N bytes and read them back
 ```
 
-> **R-MEM slot 0 is read-protected** on ENGINEERING_SAMPLES_01.
+> **R-MEM slot 0 is not used:** its behaviour is unclear (backlog 3.14).
 > The convention used here: cert for ECC slot N → R-MEM slot N+1.
 
 ---
@@ -409,13 +410,13 @@ Expected:
 | Symptom | Cause | Fix |
 |---|---|---|
 | `LT_L2_SPI_ERROR` | Bad SPI wiring or wrong device | Check `/dev/spidev2.0`, CS GPIO=25 |
-| `LT_HOST_SECURE_CHANNEL_SETUP` | Wrong pairing keys | Rebuild with `LT_SH0_KEYS=eng_sample` |
-| `LT_L3_R_MEM_DATA_WRITE_WRITE_FAIL` on slot 0 | Slot 0 is read-protected on ES01 | Use slot 1+ |
-| `OpenSSL: error:bad signature` on server | Double-hashing in ECDSA path | Ensure patch `005-add-ecdsa-sign-prehash.patch` is applied |
+| `LT_HOST_SECURE_CHANNEL_SETUP` | Wrong pairing key | Set `es01` or `prod0` in `/etc/tropic01/slot0-key`; a provisioned unit needs `/etc/tropic01/pairing.*` |
+| Anything on R-MEM slot 0 | Slot 0 is not used (backlog 3.14) | Use slot 1+ |
+| `OpenSSL: error:bad signature` on server | Double-hashing in ECDSA path | Ensure patch `008-port-to-libtropic-4.2.patch` is applied |
 | `Cannot open TUN/TAP dev /dev/net/tun` | `tun` module not loaded | `modprobe tun && echo tun > /etc/modules.d/tun` |
 | `ip link set failed: could not execute external program` | OpenVPN looking for `/usr/sbin/ip` | Add `iproute /sbin/ip` to client config |
-| No cert found in `--show-pkcs11-ids` | Cert not stored or wrong slot | Re-run step 4; verify `tropicctl mem write 1` --in returned `LT_OK` |
-| TLS handshake timeout | Server log shows `bad signature` | Prehash patch missing (patch 005) |
+| No cert found in `--show-pkcs11-ids` | Cert not stored or wrong slot | Re-run step 4; `tropicctl mem write 1 --in client.der` reads the slot back and says so |
+| TLS handshake timeout | Server log shows `bad signature` | Patch 008 missing |
 | Two clients get the same VPN IP | Same CN on both certs | Use unique CN per device when signing |
 
 ---
@@ -426,7 +427,7 @@ Expected:
 |---|---|---|
 | ECC key slots | 0 | P-256 private key (hardware-generated, never exported) |
 | ECC key slots | 1–31 | Reserved for additional keys |
-| R-MEM | 0 | **READ-PROTECTED** on ENGINEERING_SAMPLES_01 — do not use |
+| R-MEM | 0 | not used: behaviour unclear (backlog 3.14) |
 | R-MEM | 1 | DER X.509 client cert for ECC slot 0 (≤ 444 bytes) |
 | R-MEM | 2–31 | DER certs for ECC slots 1–30 (if used) |
 | R-MEM | 32–511 | General-purpose user data |

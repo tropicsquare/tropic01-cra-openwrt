@@ -3,7 +3,7 @@
 > **Superseded for owners by [openvpn-user-guide.md](openvpn-user-guide.md)**, which covers key generation, a real
 > certificate request signed by the chip, the certificate, and installing a `.ovpn` with a tested helper script.
 > This older guide is kept as background. Its steps 5-6 sign the TROPIC01 public key with a **dummy request and
-> `--force-pubkey`**, so the CA never sees proof that the key is held in the chip; prefer the CSR flow in the user guide.
+> `-force_pubkey`**, so the CA never sees proof that the key is held in the chip; prefer the CSR flow in the user guide.
 
 
 This guide describes how to provision a new OpenWrt router with a **TROPIC01-ES** secure
@@ -31,8 +31,8 @@ Each router gets:
 - A unique P256 key pair generated in hardware (ECC slot 0)
 - A unique X.509 client certificate signed by the VPN CA (stored in R-MEM slot 1)
 
-**Convention:** cert for ECC slot N is stored in R-MEM slot N+1 (slot 0 is read-protected
-on ENGINEERING_SAMPLES_01 hardware, so slot 1 is the first usable one).
+**Convention:** cert for ECC slot N is stored in R-MEM slot N+1. R-MEM slot 0 is not used:
+its behaviour is unclear (backlog 3.14).
 
 ---
 
@@ -47,7 +47,7 @@ on ENGINEERING_SAMPLES_01 hardware, so slot 1 is the first usable one).
 ### Build environment
 - This OpenWrt tree with the following custom packages already present:
   - `features/core/libtropic` — libtropic base library
-  - `features/core/libtropic-pkcs11` — PKCS#11 provider (with patches 001–005)
+  - `features/core/libtropic-pkcs11` — PKCS#11 provider (with this feed's patches, see `features/core/libtropic-pkcs11/patches/`)
   - `features/core/tropicctl` — command-line tool (also installed as `lt-util`)
   - `features/cra-03-key-storage/openvpn` — OpenVPN with PKCS#11 support
 
@@ -62,8 +62,7 @@ on ENGINEERING_SAMPLES_01 hardware, so slot 1 is the first usable one).
 If a firmware image is already built and deployed, skip this step.
 
 ```bash
-# From the OpenWrt build root
-cd /path/to/openwrt
+# From the repository root
 
 # Build the relevant packages
 make package PKG=libtropic
@@ -72,7 +71,7 @@ make package PKG=tropicctl
 make package PKG=openvpn
 
 # Build a full firmware image for your target
-make -j$(nproc)
+make build
 ```
 
 Flash the resulting image (`bin/targets/.../<target>-sysupgrade.bin`) to the router.
@@ -98,7 +97,8 @@ Batch ID               = 0x0000FFFFFF
 ```
 
 If you see `LT_L2_SPI_ERROR` check wiring. If you see `LT_HOST_SECURE_CHANNEL_SETUP` the
-pairing keys may be wrong — verify the firmware was built with `ENGINEERING_SAMPLES_01`.
+pairing key may be wrong — set `es01` or `prod0` in `/etc/tropic01/slot0-key`; a provisioned
+unit needs `/etc/tropic01/pairing.*`.
 If you see `GPIO_V2_GET_LINE_IOCTL error! ... Resource busy`, another process
 (usually OpenVPN) already holds the SPI/GPIO session — TROPIC01 supports only
 one at a time. Stop it first (`/etc/init.d/openvpn stop`).
@@ -116,7 +116,7 @@ tropicctl ecc generate 0 --curve p256        # Generate P256 key in ECC slot 0
 
 Expected output:
 ```
-INFO    lt_ecc_key_generate() : LT_OK
+ecc slot 0: generated a p256 key; public key <hex>
 ```
 
 ---
@@ -128,13 +128,10 @@ Export the 64-byte raw public key (X‖Y coordinates) to a file:
 ```bash
 # On the router:
 tropicctl ecc pub 0 --out /tmp/tropic_pub.bin
+wc -c /tmp/tropic_pub.bin   # 64
 ```
 
-Expected output:
-```
-Curve: P256
-Number of elements written: 64
-```
+`ecc pub` with `--out` prints nothing; check that the file is 64 bytes.
 
 Copy the raw key to the build host for certificate creation:
 
@@ -196,7 +193,7 @@ scp "$SPKI_PEM" root@<VPN_SERVER_IP>:/tmp/tropic_pub_${ROUTER}.pem
 ssh root@<VPN_SERVER_IP> << ENDSSH
 cd /root/easy-rsa
 
-# Create a dummy CSR (the key in it will be replaced by --force-pubkey)
+# Create a dummy CSR (the key in it will be replaced by -force_pubkey)
 openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
     -nodes -keyout /tmp/dummy_${ROUTER}.key \
     -subj "/CN=${ROUTER}" -out /tmp/${ROUTER}.csr
@@ -241,10 +238,10 @@ ssh root@<router-ip> 'tropicctl mem write 1 --in /tmp/client.der'
 
 Expected output:
 ```
-INFO    lt_r_mem_data_write(): LT_OK
+slot 1: wrote N bytes and read them back
 ```
 
-> **Note:** R-MEM slot 0 is hardware-read-protected on ENGINEERING_SAMPLES_01.
+> **Note:** R-MEM slot 0 is not used (backlog 3.14).
 > Always use slot N+1 for the cert of ECC key slot N.
 
 ---
@@ -382,13 +379,13 @@ ssh root@<router-ip> '/etc/init.d/openvpn restart'
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
 | `LT_L2_SPI_ERROR` | Bad SPI wiring or wrong device | Check `/dev/spidev2.0`, GPIO CS=25 |
-| `LT_HOST_SECURE_CHANNEL_SETUP` | Wrong pairing keys | Rebuild with `ENGINEERING_SAMPLES_01` |
-| `LT_L3_R_MEM_DATA_WRITE_WRITE_FAIL` on slot 0 | Protected slot (ES01) | Use slot 1+ |
-| `OpenSSL: error:bad signature` on server | Double-hashing | Ensure patch `005-add-ecdsa-sign-prehash.patch` is applied |
+| `LT_HOST_SECURE_CHANNEL_SETUP` | Wrong pairing key | Set `es01` or `prod0` in `/etc/tropic01/slot0-key`; a provisioned unit needs `/etc/tropic01/pairing.*` |
+| Anything on R-MEM slot 0 | Slot 0 is not used (backlog 3.14) | Use slot 1+ |
+| `OpenSSL: error:bad signature` on server | Double-hashing | Ensure patch `008-port-to-libtropic-4.2.patch` is applied |
 | `Cannot open TUN/TAP dev /dev/net/tun: No such file` | `tun` module not loaded | `modprobe tun` and `echo tun > /etc/modules.d/tun` |
 | `ip link set failed: could not execute external program` | OpenVPN looking for `/usr/sbin/ip` | Add `iproute /sbin/ip` to client config |
-| No cert found in `--show-pkcs11-ids` | Cert not stored / wrong slot | Re-run step 7; verify `tropicctl mem write 1 --in ...` returned `LT_OK` |
-| TLS handshake timeout (60 s) | Server log shows `bad signature` | Prehash patch missing |
+| No cert found in `--show-pkcs11-ids` | Cert not stored / wrong slot | Re-run step 7; `tropicctl mem write 1 --in client.der` reads the slot back and says so |
+| TLS handshake timeout (60 s) | Server log shows `bad signature` | Patch 008 missing |
 
 ---
 
@@ -399,7 +396,7 @@ ROUTER="routerXX"
 ROUTER_IP="<router-ip>"
 
 # 1. Generate hardware key
-ssh root@$ROUTER_IP 'tropicctl ecc generate 0' --curve p256
+ssh root@$ROUTER_IP 'tropicctl ecc generate 0 --curve p256'
 
 # 2. Export public key
 ssh root@$ROUTER_IP 'tropicctl ecc pub 0 --out /tmp/tropic_pub.bin'
@@ -450,7 +447,7 @@ ssh root@$ROUTER_IP 'ping -c 3 10.8.0.1'
 |---|---|---|
 | ECC key slots | 0 | P256 private key (hardware-generated, never exported) |
 | ECC key slots | 1–31 | Reserved for future use |
-| R-MEM (user data) | 0 | READ-PROTECTED on ENGINEERING_SAMPLES_01 — do not use |
+| R-MEM (user data) | 0 | not used: behaviour unclear (backlog 3.14) |
 | R-MEM (user data) | 1 | DER X.509 client certificate for ECC slot 0 (≤ 444 bytes) |
 | R-MEM (user data) | 2–31 | DER certs for ECC slots 1–30 (if used) |
 | R-MEM (user data) | 32–511 | General purpose user data |
@@ -460,7 +457,7 @@ ssh root@$ROUTER_IP 'ping -c 3 10.8.0.1'
 | File | Purpose |
 |---|---|
 | `/usr/bin/tropicctl` (and the `lt-util` symlink) | TROPIC01 command-line tool |
-| `/usr/lib/libtropic_pkcs11.so` | PKCS#11 provider (symlink to `.so.spi`) |
+| `/usr/lib/libtropic_pkcs11.so` | PKCS#11 provider (installed directly, no `.so.spi`) |
 | `/etc/openvpn/ca.crt` | VPN CA certificate |
 | `/etc/openvpn/ta.key` | TLS-crypt pre-shared key |
 | `/etc/openvpn/client.crt` | Client X.509 certificate (public) |

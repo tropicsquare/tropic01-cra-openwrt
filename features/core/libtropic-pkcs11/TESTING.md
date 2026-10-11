@@ -4,63 +4,65 @@ This guide provides instructions for testing the PKCS#11 module after installati
 
 ## Quick Test Tool (Recommended)
 
-Build it with `make package PKG=pkcs11-test`; the binary (67KB) lands at:
+Build it with `make package PKG=pkcs11-test`; the package lands at:
 ```
-build/openwrt/bin/targets/mediatek/filogic/packages/pkcs11-test
+build/openwrt/bin/packages/aarch64_cortex-a53/tropic01/pkcs11-test-*.apk
 ```
 
 ### Using pkcs11-test
 
 1. **Copy to your device:**
    ```bash
-   scp build/openwrt/bin/targets/mediatek/filogic/packages/pkcs11-test root@<router-ip>:/usr/bin/
+   scp build/openwrt/bin/packages/aarch64_cortex-a53/tropic01/pkcs11-test-*.apk root@<router-ip>:/tmp/
    ```
 
-2. **Make executable:**
+2. **Install it:**
    ```bash
-   ssh root@<router-ip> 'chmod +x /usr/bin/pkcs11-test'
+   ssh root@<router-ip> 'apk add --allow-untrusted /tmp/pkcs11-test-*.apk'
    ```
 
 3. **Test the module:**
    ```bash
-   ssh root@<router-ip> 'pkcs11-test /usr/lib/libtropic_pkcs11.so'
+   ssh root@<router-ip> 'pkcs11-test --module /usr/lib/libtropic_pkcs11.so'
    ```
 
 ### Expected Output
 
 ```
-PKCS#11 Module Test
-==================
-
-Loading module: /usr/lib/libtropic_pkcs11.so
+Loading PKCS#11 module: /usr/lib/libtropic_pkcs11.so
 ✓ Module loaded successfully
+✓ C_GetFunctionList: OK
+  Cryptoki version: 2.40
 
-✓ C_GetFunctionList succeeded
-✓ C_Initialize succeeded
+Initializing module...
+✓ C_Initialize: OK
 
-Module Information:
-  Cryptoki Version: 2.40
-  Manufacturer ID:  Tropic Square
-  Library Description: Tropic PKCS#11 Module
-  Library Version:  0.1
+=== Module Information ===
+Cryptoki version: 2.40
+Manufacturer ID:  TropicSquare
+Library desc:     Tropic PKCS11
+Library version:  0.0
+Flags:            0x00000000
 
-✓ C_Finalize succeeded
+Finalizing module...
+✓ C_Finalize: OK
 
-All tests passed!
+=== Test Summary ===
+Module:     /usr/lib/libtropic_pkcs11.so
+Status:     PASSED
+The PKCS#11 module appears to be functional.
 ```
+
+`Status: PASSED` is printed whenever the tool reaches the end; check the `✓`
+lines and look for `Warning:` or `Error:` lines on stderr.
 
 ## Alternative: Using OpenSSL
 
-OpenSSL (if available) can also test PKCS#11 modules:
+OpenSSL 3 with `pkcs11-provider`, as `cra-03-key-storage` configures it, can sign with a key in the chip:
 
 ```bash
-# Load the module
-openssl engine pkcs11 -t \
-  -pre SO_PATH:/usr/lib/engines/pkcs11.so \
-  -pre MODULE_PATH:/usr/lib/libtropic_pkcs11.so
-
-# List available keys
-openssl engine pkcs11 -post "PIN:1234"
+OPENSSL_CONF=/etc/ssl/tropic01-aws/openssl-aws.cnf \
+  openssl pkeyutl -sign -inkey "pkcs11:id=%01;type=private" -in hash.bin -out sig.bin
 ```
 
 ## Rebuilding pkcs11-test
@@ -71,7 +73,7 @@ make package PKG=pkcs11-test
 ```
 
 - **Source**: `features/core/pkcs11-test/src/pkcs11-test.c`
-- **Binary**: `build/openwrt/bin/targets/mediatek/filogic/packages/pkcs11-test` (67KB stripped)
+- **Package**: `build/openwrt/bin/packages/aarch64_cortex-a53/tropic01/pkcs11-test-*.apk`
 - **Architecture**: aarch64 (ARM64) for Cortex-A53
 
 ## Troubleshooting
@@ -85,10 +87,10 @@ ls -lh /usr/lib/libtropic_pkcs11.so
 file /usr/lib/libtropic_pkcs11.so
 ```
 
-### USB Device Not Found
+### SPI Device Not Found
 ```bash
-# Check USB device
-ls -l /dev/ttyACM0
+# Check the SPI bus and the chip-select GPIO
+ls -l /dev/spidev2.0 /dev/gpiochip0
 
 # View kernel messages
 dmesg | tail -20
@@ -99,8 +101,8 @@ dmesg | tail -20
 # Ensure binary is executable
 chmod +x /usr/bin/pkcs11-test
 
-# Run with verbose output
-pkcs11-test /usr/lib/libtropic_pkcs11.so
+# Run it
+pkcs11-test --module /usr/lib/libtropic_pkcs11.so
 ```
 
 ## Advanced Testing with p11-kit (Optional)

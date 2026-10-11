@@ -31,9 +31,10 @@ does and does not do. Update the item's status when it moves.
 Stop and get explicit confirmation from the user, for that specific step,
 before any of:
 
-- anything irreversible on hardware: invalidating TROPIC01 pairing slots,
-  erasing key slots or R-MEM, incrementing monotonic counters, programming
-  SoC eFuses
+- anything irreversible or hazardous on hardware: writing or invalidating
+  TROPIC01 pairing slots, erasing key slots or R-MEM, initialising or
+  decrementing monotonic counters, clearing I-config bits, updating the chip
+  firmware, rewriting the R-config, programming SoC eFuses
 - flashing a router
 - `git push`, creating or merging pull requests, publishing releases
 

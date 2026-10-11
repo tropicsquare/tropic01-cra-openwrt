@@ -19,6 +19,6 @@ config PACKAGE_libtropic-pkcs11
 	  
 	  The module is installed as /usr/lib/libtropic_pkcs11.so
 	  
-	  Default USB device: /dev/ttyACM0
+	  Default device: SPI /dev/spidev2.0, chip-select /dev/gpiochip0 pin 25
 	  
 	  https://github.com/tropicsquare/libtropic-pkcs11

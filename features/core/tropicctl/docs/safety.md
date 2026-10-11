@@ -16,7 +16,8 @@ The classes of the commands are in the [reference](reference.md). Irreversible (
 ## Chip hazards the tool is built around
 
 - **Pairing slots are written once** (they live in I-Memory) and can be invalidated, also irreversibly. Slot 0 holds
-  the shared engineering-sample key and is never written by the tool.
+  the shared slot-0 key published with libtropic (ES01 on engineering samples, prod0 on chips with production
+  provisioning) and is never written by the tool.
 - **R-config must be erased before it is written.** libtropic documents that writing it without erasing first can
   put the chip into permanent Alarm Mode (erratum OI_TR01_ERR_2026010800). `tropicctl` has no raw
   "write one R-config object" command; `config rewrite` saves a backup, erases, writes and reads back by itself, and

@@ -56,5 +56,5 @@ Run on a spare chip only; an update cannot be undone (a chip never accepts an ol
    (`boot_v_2_0_1` for silicon ACAB, `boot_v_1_0_1` for ABAB). Run it from a stable power supply, in the background if
    it goes over SSH, and read the log.
 4. `tropicctl fw status`, then `tropicctl fw maintenance off --yes-rewrite-r-config` and a `chip reboot`.
-5. After any R-config rewrite, check the change is not in force until `tropicctl chip reboot` (the fake and the model
-   both assume this; record what the chip does).
+5. After any R-config rewrite, run `tropicctl chip reboot`: the change is not in force until then (measured on a spare
+   chip).

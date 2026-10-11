@@ -43,7 +43,7 @@ and the README of this feature is where that stays honest.
 - **Key.** 32 bytes from TROPIC01's RNG, stored in **R-MEM slot 100** and nowhere
   on flash. While a command runs it exists only as a `0600` file in RAM, removed
   on exit. R-MEM 32-511 is general purpose; 1-31 hold factory certificates and are
-  refused; 0 is read-protected on these samples.
+  refused; 0 is not used (backlog 3.14).
 - **Crypto-erase.** `tropic01-vault destroy --yes-destroy-vault` closes the
   vault, **erases slot 100**, checks that the slot no longer returns data, and
   only then deletes the image. If the erase or the check fails the image is kept
@@ -65,11 +65,12 @@ Does **not** protect:
 
 - **Anything outside `/vault`.** Nothing moves data into it automatically; apps
   and the owner have to put data there.
-- **Against someone who holds the whole unit.** The chip is reachable with the
-  pairing key, and today every unit uses the shared engineering-sample key (cra-04:
-  slot 0 is valid, nothing is provisioned). Anyone with the board can read R-MEM slot
-  100 and decrypt a flash copy. Closing that needs the per-unit pairing key and
-  invalidating slot 0, which is deliberately deferred.
+- **Against someone who holds the whole unit.** The chip is reachable with a
+  pairing key. Units that are not provisioned answer to the shared
+  engineering-sample key; provisioned units (cra-04) answer to a per-unit key that
+  is on the same flash. Either way the holder can read R-MEM slot 100 and decrypt
+  the vault. Closing that needs the PIN-protected pairing key (cra-04 tier 1),
+  which the vault does not use.
 - **While running.** Root can read the unlocked vault and the key in RAM.
 - **NAND wear/physical remnants.** Deleting the image does not guarantee the old
   ciphertext blocks are gone; that is the point of crypto-erase, and it only holds
@@ -118,6 +119,9 @@ Does **not** protect:
   back on the router: the device refused to open it** (`could not read the vault key from TROPIC01 slot
   100`, nothing mapped or mounted). This is the key-only case: the ciphertext was present, only the key was
   gone.
+- **Repeated on a clean rebuild (2026-10-11):** `init` (key in slot 100, no plaintext in the image), lock,
+  unlock, `destroy` without its flag refused, `destroy` erased slot 100 and deleted the image, and the
+  **old image put back was refused**.
 - **`destroy` on the real chip:** before, the vault was open and slots 100 and 1 held 32
   and 299 bytes; after, slot 100 reads `LT_L3_R_MEM_DATA_READ_SLOT_EMPTY`, the image
   file is gone, nothing is mapped or mounted, `open` refuses, slot 1 (the factory

@@ -38,8 +38,8 @@ Package `tropic01-security-log`, enabled by default:
   the current file plus one rotated). The filter selects by program, because
   `logread` can match only the message text: SSH (`dropbear`), console login
   (`login`), LuCI (`dispatcher.uc`) and `rpcd` logins and failed logins,
-  `passwd` changes, this project's own components (`tropic01-console-guard`,
-  `tropic01-audit`) and firmware-update messages. A program that is not on that
+  `passwd` changes, every program of this project (`tropic01-*`: console
+  guard, audit, vault, pairing) and firmware-update messages. A program that is not on that
   list is not recorded.
 - **Change audit.** `tropic01-config-audit` logs *which* security-relevant
   files changed (`/etc/config/*`, `/etc/shadow`, `/etc/passwd`, `/etc/group`,
@@ -76,7 +76,8 @@ Package `tropic01-security-log`, enabled by default:
 - **Flash wear** is bounded by the size cap and the low event rate; it is not
   zero.
 - A **factory reset** erases the log with the rest of the overlay (good for
-  privacy, bad for forensics); the log is not in the sysupgrade keep list.
+  privacy, bad for forensics). A sysupgrade that keeps settings keeps the log
+  (`/etc/tropic01/` is on the keep list).
 
 ## Backlog
 
@@ -98,8 +99,9 @@ over a wired link, failed and successful, were recorded; a config edit
 recorded by file/service name; the size cap held; a 34 KB copy of the log
 contained neither the real nor the wrong password; `disable` stopped both
 processes and nothing new was recorded, the stored lines were kept, `enable`
-resumed, and `clear` removed the log and baseline. The unit was running the
-package from `/tmp`-pushed files, not from a flashed image.
+resumed, and `clear` removed the log and baseline. This was run first with
+the package from `/tmp`-pushed files, then on the flashed final image
+(`bench.py suite`, cra-06 18 of 18).
 
 Things the hardware testing showed about `logread` (they shaped the design):
 
@@ -126,4 +128,4 @@ Things the hardware testing showed about `logread` (they shaped the design):
 - [x] a config change and a service enablement are recorded, names only
 - [x] the user can disable, inspect and erase the log
 - [x] confirmed on hardware (see Testing)
-- [ ] this README says what is still not covered (above)
+- [x] this README says what is still not covered (above)

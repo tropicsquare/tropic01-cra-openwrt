@@ -14,3 +14,10 @@
   write goes to I-Memory, which can fail silently on old firmware): treat
   it like invalidation and read the slot back. Same rule: explicit
   confirmation, on that unit, in the current conversation.
+- Rewriting the R-config (`--yes-rewrite-r-config`) can lock a key out if
+  done wrong, and it takes effect only after a chip restart
+  (`tropicctl chip reboot`). Test the undo first. Same rule: explicit
+  confirmation, on that unit, in the current conversation.
+- `tests/hardware/bench.py cra04` (and `suite`) is for unprovisioned units: it plants and
+  deletes test key files in `/etc/tropic01/`. It refuses when `pairing.*` exists; never
+  work around that on a provisioned unit.

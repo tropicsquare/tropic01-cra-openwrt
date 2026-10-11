@@ -36,7 +36,7 @@ Each row is a folder under [`features/`](features/) with its own README.
 | [cra-01-secure-defaults](features/cra-01-secure-defaults/) | 2(b) secure by default | closed WAN, SSH on the LAN only, a root password is forced before any shell, empty passwords are refused | **none today** (policy and configuration) | partial |
 | [cra-02-verified-boot](features/cra-02-verified-boot/) | 2(f), 2(c) integrity, rollback | signed boot and anti-rollback | planned: a monotonic counter for anti-rollback. It is **not** the boot root of trust | not started |
 | [cra-03-key-storage](features/cra-03-key-storage/) | 2(e) confidentiality | OpenVPN client whose private key lives in the chip | **central:** generates the key, signs inside the chip, stores the certificate | done for OpenVPN |
-| [cra-04-access-control](features/cra-04-access-control/) | 2(d) authentication | per-unit keys for talking to the chip | **central:** pairing keys and access privileges | partial: nothing provisioned |
+| [cra-04-access-control](features/cra-04-access-control/) | 2(d) authentication | per-unit keys for talking to the chip | **central:** pairing keys and access privileges | partial: per-unit key on the bench unit and a spare chip; slot 0 restricted, not invalidated |
 | [cra-05-secure-erase](features/cra-05-secure-erase/) | 2(m) secure data removal | an encrypted vault that can be destroyed cryptographically | **central:** random key and key storage, erased on destroy | partial: one folder, not the whole disk |
 | [cra-06-security-logging](features/cra-06-security-logging/) | 2(l) logging with opt-out | a security event log and a change audit | **none today** (a signed log is on the backlog) | partial |
 
@@ -51,7 +51,8 @@ the OpenVPN tunnel with the key in the chip (including key generation, a chip-si
 and storing the certificate), the encrypted vault and its crypto-erase, and the security log.
 
 **Not done, and said plainly:** verified boot and rollback protection (cra-02); per-unit chip pairing keys
-are generated but **not provisioned**, so the shared engineering-sample key still works on every unit;
+are provisioned only on one bench unit and a spare chip (slot 0 restricted there, not invalidated), so on any other unit
+the shared key still works;
 only the vault folder is encrypted, not the whole device; AWS IoT telemetry does not work; and on a unit
 with no password set, the first person on the LAN can choose it through the web UI.
 
@@ -157,6 +158,7 @@ Check the chip first: `tropicctl info chip` prints its identification. It must n
 | keep some data in an encrypted vault that can be destroyed | `tropic01-vault init` (writes R-MEM slot 100), data in `/vault`, `tropic01-vault destroy --yes-destroy-vault` to erase the key and the image. See [cra-05](features/cra-05-secure-erase/) |
 | see or switch off the security log | `tropic01-security-log status \| show \| disable \| enable \| clear`. See [cra-06](features/cra-06-security-logging/) |
 | make a per-unit chip pairing key | `features/cra-04-access-control/host-tools/tropic01-gen-pairing-key.sh`. It only generates files; nothing is written to the chip. See [cra-04](features/cra-04-access-control/) |
+| put the per-unit key on the chip and take the shared key's rights away | `tropic01-pairing status`, then `tropic01-pairing provision --yes-write-pairing-slot --yes-rewrite-r-config` (`undo` restores the old access rights). The slot write is one way. See [cra-04](features/cra-04-access-control/) |
 | bake a unique root password into an image | `features/cra-01-secure-defaults/host-tools/tropic01-gen-credential.sh`. See [cra-01](features/cra-01-secure-defaults/) |
 | get SSH access to a bench image without typing a password each flash | `features/cra-01-secure-defaults/host-tools/tropic01-gen-test-key.sh` (**development only**: the image it builds skips the forced-password prompt) |
 
@@ -171,7 +173,11 @@ operations cannot, and this project never runs them automatically; the docs mark
 | invalidating pairing-key slot 0 | permanent; if the replacement key is lost, **the chip can never be opened again** |
 | generating a key in an ECC slot, clearing it later | the private key cannot be backed up or read; clearing destroys that identity |
 | erasing an R-MEM slot | the data is gone for good (it is how the vault is destroyed) |
-| (planned) programming SoC eFuses, incrementing a monotonic counter | one way |
+| initialising or decrementing a monotonic counter (`tropicctl counter init/update`) | a counter only counts down |
+| clearing an I-config bit (`tropicctl config burn`) | a bit never goes back to 1 |
+| updating the chip firmware (`tropicctl fw update`) | no downgrade; an interrupted update can leave the chip unusable |
+| rewriting the R-config (`tropicctl config rewrite`, `tropic01-pairing provision`) | a wrong file can lock keys out; it takes effect after `tropicctl chip reboot` |
+| (planned) programming SoC eFuses | one way |
 
 If you work with an AI agent, it is instructed to stop and ask before each of these (see
 [SKILLS.md](SKILLS.md)).
@@ -180,7 +186,7 @@ If you work with an AI agent, it is instructed to stop and ask before each of th
 
 ```sh
 make lint          # shellcheck on every shell script
-make test          # 52 sandbox checks: router-side scripts against fake hardware, no board needed
+make test          # sandbox checks and the tropicctl tests, against fake hardware, no board needed
 python3 tests/hardware/bench.py suite   # the real-board suite: needs a board, see tests/hardware/README.md
 ```
 
@@ -201,7 +207,7 @@ features/             this repo's feed: one folder per feature
   <feature>/host-tools/       scripts that run on your computer, not on the router
 docs/cra/             the CRA mapping, the backlog, the hardware test report, known pitfalls
 tests/sandbox/        tests that need no board        tests/hardware/   tests that drive a real board
-scripts/              prepare.sh: clone, patch, wire feeds, assemble .config
+scripts/              prepare.sh: clone, patch, wire feeds, assemble .config; check-doc-links.py
 .claude/skills/       task guides for AI agents
 ```
 
@@ -214,6 +220,9 @@ scripts/              prepare.sh: clone, patch, wire feeds, assemble .config
 - [docs/cra/hardware-test-report.md](docs/cra/hardware-test-report.md): what was tested, on what, with what result
 - [docs/cra/compliance-pitfalls.md](docs/cra/compliance-pitfalls.md): where good intentions erode
 - [features/cra-03-key-storage/docs/openvpn-user-guide.md](features/cra-03-key-storage/docs/openvpn-user-guide.md): key, CSR, certificate, profile
+- [features/core/tropicctl/README.md](features/core/tropicctl/README.md): the TROPIC01 command-line tool; [reference](features/core/tropicctl/docs/reference.md) and [safety classes](features/core/tropicctl/docs/safety.md)
+- [features/cra-04-access-control/docs/pairing-key-design.md](features/cra-04-access-control/docs/pairing-key-design.md): per-unit pairing keys and access rights
+- [tests/sandbox/README.md](tests/sandbox/README.md) and [tests/hardware/README.md](tests/hardware/README.md): the tests
 - [SKILLS.md](SKILLS.md): working on this repository with an AI agent, with example prompts
 
 ## Contributing, security, license

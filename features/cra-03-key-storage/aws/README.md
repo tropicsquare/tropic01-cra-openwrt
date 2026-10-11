@@ -33,6 +33,10 @@ curl -o AmazonRootCA3.pem https://www.amazontrust.com/repository/AmazonRootCA3.p
 ## Provisioning
 
 Run the `tropic01-aws-provision` script on the router to generate a device
-key inside TROPIC01 and create a CSR.  Register the CSR in AWS IoT Core to
-obtain a device certificate, then deploy it as described in the
-[TROPIC01 AWS IoT guide](../docs/solution-description.md).
+key inside TROPIC01 (ECC slot 1). Register a certificate for it in AWS IoT
+Core, then store the certificate with `tropicctl mem write 2 --in <cert.der>`
+(R-MEM slot 2, for ECC slot 1). Copy `AmazonRootCA1.pem` to
+`/etc/ssl/tropic01-aws/` on the router; the package does not install it.
+
+AWS telemetry does not work yet: see
+[AWS IoT known issues](../docs/aws-iot-known-issues.md).

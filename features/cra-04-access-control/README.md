@@ -7,18 +7,19 @@
 | | |
 |---|---|
 | Requirement | CRA Annex I, Part I, 2(d): protection from unauthorised access, authentication |
-| Status | partial: provisioning tool and tests exist, no unit has been provisioned |
-| Irreversible step | invalidating pairing slot 0 (needs explicit confirmation, see CLAUDE.md in this folder) |
+| Status | partial: `tropic01-pairing` provisions a per-unit key and restricts the shared key; run on a spare chip and on the bench unit (2026-10-11); slot 0 is not invalidated anywhere |
+| Irreversible step | writing a pairing slot (`tropic01-pairing`); invalidating slot 0 (not done, a separate decision). See CLAUDE.md in this folder |
 
 ## Role of TROPIC01
 
 **Central, and the part that is not finished.** The chip only talks to a host that proves
-knowledge of a *pairing key* held in one of four pairing slots. Today every unit uses the same
-published engineering-sample key (slot 0), so anyone with that key can open a session with any
-unit's chip. The fix is a per-unit pairing key written to a spare slot with slot 0 then
-invalidated; the tooling for that exists, and it is deliberately not run, because invalidation
-cannot be undone. The chip also enforces per-slot access rules (user access policy) for keys and
-data that this feature will use once units are provisioned.
+knowledge of a *pairing key* held in one of four pairing slots. Units that are not provisioned
+use the same published engineering-sample key (slot 0), so anyone with that key can open a session
+with their chip. The fix is a per-unit pairing key in a spare slot, with the shared key's rights
+taken away in the R-config. `tropic01-pairing` does this. It was run on a spare chip and on the
+bench unit. There slot 0 is restricted, not invalidated: invalidation cannot be undone and is a
+separate decision. The chip also enforces per-slot access rules (user access policy) for keys and
+data; beyond removing the shared key's rights, this feature does not use them yet.
 
 ## What already works (lives in core/ and cra-03)
 
@@ -33,16 +34,20 @@ and an X.509 certificate stored in TROPIC01 R-MEM, used for OpenVPN
    (`core/libtropic-pkcs11/patches/003-use-engineering-sample-keys.patch`).
    Anyone with that key and bus access can open a secure session to any
    unit in the fleet.
-2. **No privilege scoping.** Access is all-or-nothing per pairing slot;
-   TROPIC01 User Access Privileges (UAP) are not configured.
+2. **Little privilege scoping.** `tropic01-pairing` takes all rights from
+   the shared key; nothing else is scoped. R-MEM rights are all-or-nothing
+   per pairing key (measured).
 3. **Private half on flash.** Even a per-unit pairing key is only as
    strong as where its private half is stored.
 
-## What is implemented (software side, no chip writes)
+## What is implemented
 
-The host-to-chip pairing key can now be per unit instead of shared, but
-**no unit has been provisioned**: nothing has written a pairing slot or
-invalidated slot 0, so on every unit the shared key still works.
+The host-to-chip pairing key can be per unit instead of shared. The spare
+chip (slot 3) and the bench unit (slot 1, 2026-10-11) are provisioned. On the
+bench unit the shared key is refused. On the spare chip the restriction was
+verified and then undone, so its R-config is the original again. Slot 0 is
+not invalidated anywhere. Other
+units still use the shared key.
 
 - `host-tools/tropic01-gen-pairing-key.sh <serial> <build>/files <manifest>`
   creates a unit's X25519 pairing key pair into the image overlay
@@ -59,25 +64,22 @@ invalidated slot 0, so on every unit the shared key still works.
 - **`tropic01-pairing`** (`tropic01-pairing/`, a package of this feature) runs the whole tier-0 provisioning on top of
   `tropicctl`: `status`, `provision`, `undo`. Every chip write is off by default and has its own flag
   (`--yes-write-pairing-slot`, `--yes-rewrite-r-config`). It refuses chip firmware older than 2.0.0 (I-Memory writes can fail
-  silently there), writes the unit's public key into its slot and reads it back, proves the per-unit key opens a session,
+  silently there) unless `--allow-old-firmware` is given; the slot is still read back. It writes the unit's public key into its slot and reads it back, proves the per-unit key opens a session,
   then rewrites the R-config so the shared slot-0 key loses its rights (erase before write, first configuration saved in
   `/etc/tropic01/rconfig-before.cfg`), restarts the chip (it loads its R-config at start-up), and checks that the shared key
   is refused and the per-unit key works; if not it restores the saved configuration. **Slot 0 is restricted, not
-  invalidated.** The sandbox test (`tests/sandbox/pairing.sh`, 63 checks against the real `tropicctl` with its fake chip)
-  covers the gates, and the script was run end to end on a spare chip (hardware report, 2026-10-11: provision into slot 3, shared key refused, per-unit key works, re-run, undo).
+  invalidated.** The sandbox test (`tests/sandbox/pairing.sh`, 65 checks against the real `tropicctl` with its fake chip)
+  covers the gates, and the script was run end to end on a spare chip (hardware report, 2026-10-11: provision into slot 3, shared key refused, per-unit key works, re-run, undo). The bench unit got its per-unit key on 2026-10-11 (slot 1, shared key restricted).
 - `/etc/tropic01/` is on the `sysupgrade` keep list (from the `tropicctl` package), so an upgrade that keeps settings keeps
   the per-unit key. A settings backup then contains the private pairing key: treat backups as credentials.
 
-## Current decision (2026-10-05)
+## Current state (2026-10-11)
 
-The unit keeps using the shared engineering-sample ("test") key in slot 0,
-which stays valid. **No per-unit key has been provisioned and slot 0 has not
-been invalidated.** A key pair for the bench unit `OWO-BENCH-01` was generated
-and backed up outside the repo but was never written to the chip, so it
-protects nothing. Provisioning stays deferred until it is decided on a
-specific unit, ideally a spare chip first.
+The bench unit has a per-unit key in slot 1. Its shared key is restricted:
+refused for R-MEM, ECC and the configuration. Slot 0 stays valid
+(invalidation is backlog 4.2). Other units still use the shared key.
 
-## Verified on hardware (OpenWrt One, TROPIC01-ES, 2026-10)
+## Read-only survey (2026-10-05, before provisioning)
 
 Run with `tests/hardware/bench.py cra04`, which pushes `tropicctl` to
 `/tmp` (nothing flashed, nothing written to the chip): with no key files the shared
@@ -85,33 +87,38 @@ key still works; pairing slot 0 is populated and slots 1-3 are **empty**
 (`LT_L3_PAIRING_KEY_EMPTY`), so no per-unit key has ever been provisioned on this unit
 and slot 1 is free; unusable key files are refused with no fallback; a wrong but
 well-formed key is used and rejected by the chip; removing the files restores access.
-**Not run on hardware:** the `libtropic-pkcs11` path (it builds, and shares the loader
-logic, but no PKCS#11 consumer was available on the unit to exercise it) and any
-successful session with a *per-unit* key, which needs the provisioning step below.
+This survey did not cover the `libtropic-pkcs11` path or a session with a *per-unit*
+key. Both were run later: on the bench unit (2026-10-11) the PKCS#11 module, the vault
+and the OpenVPN tunnel work with the per-unit key (hardware report).
+
+**`tests/hardware/bench.py cra04` and `suite` are for unprovisioned units.** They plant and
+delete test key files in `/etc/tropic01/`, so they refuse when `pairing.*` exists there.
 
 ## What this does not fix
 
-- **Nothing is provisioned.** Until a per-unit public key is written into a
-  pairing slot and slot 0 is invalidated (both below), the shared key still
-  opens every chip. Generating keys and teaching the software to use them
-  closes nothing by itself.
+- **Most units are not provisioned.** On those the shared key still opens
+  the chip. On a provisioned unit the shared key is restricted, not
+  invalidated. Generating keys alone closes nothing.
 - **The private half sits on the router's flash**, in cleartext, root-only.
   That ends *fleet-wide* sharing (one unit's key opens only that unit) but
   not extraction from a flash dump of the same unit. A stronger home needs
   the encrypted overlay of cra-05, or a TPM-style host element, neither of
   which exists here.
-- No UAP scoping yet (below).
+- No scoping beyond removing the shared key's rights (below).
 
 ## Plan
 
-Phase 1, above, is done. The rest is **irreversible per unit** and needs an
-explicit decision each time, on that unit:
+Phase 1, above, is done. Each step below needs an explicit decision on that unit:
 
-1. At provisioning, write a per-unit pairing key into slot 1 or higher.
-2. Invalidate slot 0 (the factory/engineering key).
-3. Configure UAPs per slot, e.g. a telemetry slot that can sign but cannot
+1. Write a per-unit pairing key into slot 1 or higher (one way). Done on the
+   spare chip and the bench unit.
+2. Take the shared key's rights away in the R-config (reversible). Done on the
+   bench unit; done, verified and undone on the spare chip.
+3. Invalidate slot 0 (the factory/engineering key). Irreversible; not done; a
+   separate decision.
+4. Configure UAPs per slot, e.g. a telemetry slot that can sign but cannot
    read or write R-MEM.
-4. Where the host-side private pairing key lives: decided for now (root-only file on flash, see "What this does not fix"); revisit with cra-05.
+5. Where the host-side private pairing key lives: decided for now (root-only file on flash, see "What this does not fix"); revisit with cra-05.
 
 Backlog items for this feature (provisioning, UAP scoping, private-key placement, the per-unit
 versus fleet image) are in the central [CRA backlog](../../docs/cra/backlog.md), section 4.
@@ -119,6 +126,6 @@ versus fleet image) are in the central [CRA backlog](../../docs/cra/backlog.md),
 ## Done means
 
 - [ ] two units provisioned from the same image have different pairing keys
-- [ ] slot 0 is invalidated after provisioning
+- [ ] after provisioning, the shared key is refused for R-MEM, ECC and the configuration (restricted; invalidation is backlog 4.2)
 - [ ] a slot scoped to signing is refused an R-MEM write
 - [ ] the provisioning procedure is documented, with its irreversible steps marked

@@ -16,7 +16,7 @@ This guide explains how to integrate the libtropic-pkcs11 package into your Open
 
 3. Enable the package by pressing `Y` or `M`:
    - `Y` = Built-in (included in firmware image)
-   - `M` = Module (built as separate .ipk package)
+   - `M` = Module (built as separate .apk package)
 
 4. Save and exit (press `Esc` multiple times, then select "Yes" to save)
 
@@ -73,8 +73,8 @@ build_dir/target-<arch>/libtropic-pkcs11-0.1.0/libtropic_pkcs11.so
 After building, verify the package was created:
 
 ```bash
-# Find the .ipk package (after full build)
-find ./bin -name "*libtropic-pkcs11*.ipk"
+# Find the .apk package (after full build)
+find ./bin -name "*libtropic-pkcs11*.apk"
 ```
 
 To test on a running OpenWrt device:
@@ -83,8 +83,8 @@ To test on a running OpenWrt device:
 # Copy the .so file to the device
 scp build_dir/target-*/libtropic-pkcs11-*/libtropic_pkcs11.so root@<device-ip>:/usr/lib/
 
-# Test the module
-pkcs11-tool --module /usr/lib/libtropic_pkcs11.so --show-info
+# Test the module (pkcs11-test package)
+pkcs11-test --module /usr/lib/libtropic_pkcs11.so --show-info
 ```
 
 ## Dependencies
@@ -105,19 +105,23 @@ Once the firmware is flashed or the package is installed, the PKCS#11 module wil
 Use it with any PKCS#11-compatible software:
 
 ```bash
-# With pkcs11-tool
-pkcs11-tool --module /usr/lib/libtropic_pkcs11.so --list-slots
+# With pkcs11-test
+pkcs11-test --module /usr/lib/libtropic_pkcs11.so --list-objects
 
-# With OpenSSL (requires libp11)
-openssl pkeyutl -engine pkcs11 -keyform engine -inkey "pkcs11:token=TROPIC01;id=18"
+# With OpenSSL 3 (pkcs11-provider, as cra-03-key-storage configures it)
+OPENSSL_CONF=/etc/ssl/tropic01-aws/openssl-aws.cnf \
+  openssl pkeyutl -sign -inkey "pkcs11:id=%01;type=private" -in hash.bin -out sig.bin
 ```
 
 ## Hardware Setup
 
-Ensure TROPIC01 is connected via USB:
-- Default device: `/dev/ttyACM0`
-- Check with: `ls -la /dev/ttyACM*`
-- May need permissions: `chmod 666 /dev/ttyACM0` or add user to `dialout` group
+TROPIC01 is connected via SPI:
+- SPI bus: `/dev/spidev2.0`, 1 MHz
+- Chip-select: `/dev/gpiochip0` pin 25
+- Check with: `ls -l /dev/spidev2.0 /dev/gpiochip0`
+
+These are set in the package `Makefile` as `TS_SPI_DEV`, `TS_GPIO_DEV`,
+`TS_GPIO_CS_PIN` and `TS_SPI_SPEED`.
 
 ## Troubleshooting
 
@@ -136,41 +140,26 @@ Ensure TROPIC01 is connected via USB:
   make -C build/openwrt package/libopenssl/compile V=s
   ```
 
-### Permission denied accessing /dev/ttyACM0
-```bash
-# Add user to dialout group
-usermod -a -G dialout root
-
-# Or set permissions
-chmod 666 /dev/ttyACM0
-```
-
 ### Module loads but can't communicate with TROPIC01
-- Verify USB connection
+- Check the SPI wiring and `/dev/spidev2.0`
 - Check pairing keys match your chip batch (see libtropic documentation)
 - Test with `tropicctl session test` first to ensure basic connectivity
 
 ## Advanced Configuration
 
-### Custom USB Device Path
+### Custom SPI device
 
 Edit `features/core/libtropic-pkcs11/Makefile` and modify:
 ```makefile
 CMAKE_OPTIONS += \
-    -DTS_USB_DEV="/dev/ttyACM1"
+    -DTS_SPI_DEV="/dev/spidevX.Y"
 ```
 
-### Enable Debug Logging
+### Logging
 
-For development/debugging, enable logging:
-```makefile
-CMAKE_OPTIONS += \
-    -DLT_PKCS11_LOG_EN=ON
-```
-
-Then rebuild
-
-:
+Logging is on by default (`LT_PKCS11_LOG_EN=ON` in the Makefile). Messages go
+to syslog; read them with `logread`. To turn it off, set
+`-DLT_PKCS11_LOG_EN=OFF` and rebuild:
 ```bash
 make -C build/openwrt package/feeds/tropic01/libtropic-pkcs11/clean
 make package PKG=libtropic-pkcs11
@@ -181,8 +170,11 @@ make package PKG=libtropic-pkcs11
 ```
 features/core/libtropic-pkcs11/
 ├── Config.in          # Package configuration for menuconfig
-├── Makefile          # Build instructions
-└── README.md         # Package documentation
+├── INTEGRATION.md     # This guide
+├── Makefile           # Build instructions
+├── README.md          # Package documentation
+├── TESTING.md         # Testing on the router
+└── patches/           # 001-004, 006-009, applied to the upstream source
 ```
 
 ## Further Information

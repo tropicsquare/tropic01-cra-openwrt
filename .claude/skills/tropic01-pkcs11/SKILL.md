@@ -12,10 +12,10 @@ description: >
 
 # TROPIC01 Secure Element Integration (OpenWrt)
 
-This repo adds hardware root-of-trust support via the **TROPIC01-ES** secure element
+This repo adds hardware-backed key storage via the **TROPIC01** secure element
 (Tropic Square), connected over SPI (or USB dongle), exposed to userspace through a
-PKCS#11 v2.40 module. It backs OpenVPN client auth and AWS IoT device identity with a
-private key that never leaves the chip.
+PKCS#11 v2.40 module. It backs OpenVPN client auth with a private key that never leaves the
+chip (AWS IoT device identity is not working yet; backlog 3.1).
 
 ---
 
@@ -33,7 +33,7 @@ libtropic_pkcs11.so  ← PKCS#11 v2.40 Cryptoki module (libtropic-pkcs11)
     ▼
 TROPIC01-ES  (Mikroe Click board, 3.3 V, 1 MHz SPI)
     ├── ECC slot 0   → P-256 private key (hardware-generated, non-exportable)
-    └── R-MEM slot 1 → X.509 client certificate (DER, up to 444 bytes)
+    └── R-MEM slot 1 → X.509 client certificate (DER, up to 444 bytes: the PKCS#11 module's limit; `tropicctl` handles 475)
 ```
 
 ---
@@ -43,8 +43,8 @@ TROPIC01-ES  (Mikroe Click board, 3.3 V, 1 MHz SPI)
 | Package | Purpose |
 |---|---|
 | `libtropic` | Base library for talking to TROPIC01 (secure channel, L2/L3 protocol) |
-| `libtropic-pkcs11` | PKCS#11 v2.40 Cryptoki module (`libtropic_pkcs11.so`) — has patches 001–006, see below |
-| `tropicctl` | Command-line tool: chip and firmware info, random numbers, ECC keys, R-MEM, pairing keys, configuration, PIN (MAC-and-Destroy), counters; installed as `lt-util` too (compatibility mode) |
+| `libtropic-pkcs11` | PKCS#11 v2.40 Cryptoki module (`libtropic_pkcs11.so`) — has patches 001–009 (no 005), see below |
+| `tropicctl` | Command-line tool: chip and firmware info, firmware update, chip restart, random numbers, ECC keys, R-MEM, pairing keys, configuration, PIN (MAC-and-Destroy), counters, session test; installed as `lt-util` too (compatibility mode) |
 | `pkcs11-provider` / `pkcs11-helper` | OpenSSL PKCS#11 engine/provider glue used by OpenVPN |
 | `coreMQTT` | AWS IoT MQTT client (`features/cra-03-key-storage/`; see `aws/README.md` and `docs/solution-description.md`) |
 
@@ -53,9 +53,11 @@ Additional packages:
 | Package | Location | Purpose |
 |---|---|---|
 | `openvpn` | `features/cra-03-key-storage/openvpn` | OpenVPN with PKCS#11 support + TROPIC01 procd tuning |
-| `tropic01-aws` | `features/cra-03-key-storage/tropic01-aws` | AWS IoT Core MQTT client — publishes telemetry via TROPIC01 mTLS |
+| `tropic01-aws` | `features/cra-03-key-storage/tropic01-aws` | AWS IoT Core MQTT client over TROPIC01 mTLS (not working today; backlog 3.1) |
 | `opensc` | `features/core/opensc` | `pkcs11-tool` for slot inspection and key management (build may fail) |
 | `pkcs11-test` | `features/core/pkcs11-test` | Minimal PKCS#11 smoke-test utility |
+| `libtropic-pkcs11-test` | `features/core/libtropic-pkcs11-test` | More thorough PKCS#11 test utility (not selected by default) |
+| `tropic01-pairing` | `features/cra-04-access-control/tropic01-pairing` | Guarded per-unit pairing key provisioning on top of `tropicctl` (status, provision, undo) |
 
 ---
 
@@ -72,6 +74,7 @@ Located in [`features/core/libtropic-pkcs11/patches/`](../../../features/core/li
 | 6 | `006-add-syslog-tracing.patch` | Adds syslog output for debugging (debug aid; see backlog 3.10) |
 | 7 | `007-load-per-unit-pairing-key.patch` | Loads a per-unit pairing key instead of the shared engineering-sample key, when one is provisioned |
 | 8 | `008-port-to-libtropic-4.2.patch` | Builds against the feed's libtropic 4.2.0 tree; signs a 32-byte hash with `lt_ecc_ecdsa_sign()` (no second hash) |
+| 9 | `009-select-slot0-key-at-runtime.patch` | Chooses the slot-0 key (`es01` default, or `prod0`) at run time from `$TROPICCTL_SH0` or `/etc/tropic01/slot0-key`; a per-unit key (007) still wins |
 
 `tropicctl` ([features/core/tropicctl/](../../../features/core/tropicctl/), specification in `SPEC.md`) replaces the patched `lt-util`; it is its own source tree with no patches. A P-256 key signs through `tropicctl ecc sign` (ECDSA, with OpenSSL-compatible DER output) or through PKCS#11 / OpenSSL.
 
@@ -86,7 +89,8 @@ Located in [`features/core/libtropic-pkcs11/patches/`](../../../features/core/li
 | Supply | 3.3 V |
 
 Slot convention: ECC key slot `N` pairs with R-MEM cert slot `N+1` (R-MEM slot 0 is
-read-protected on `ENGINEERING_SAMPLES_01` silicon).
+not used: documented as read-protected on `ENGINEERING_SAMPLES_01`, but it read back slot 1's data
+on the bench chip, backlog 3.14).
 
 ### R-MEM / ECC Slot Layout
 
@@ -95,7 +99,7 @@ read-protected on `ENGINEERING_SAMPLES_01` silicon).
 | ECC key slots | 0 | P-256 private key (hardware-generated, never exported) |
 | ECC key slots | 1–31 | Additional keys; slot N is PKCS#11 id `%0N` |
 | R-MEM | 0 | **READ-PROTECTED** on ENGINEERING_SAMPLES_01 — do not use |
-| R-MEM | 1 | DER X.509 client cert for ECC slot 0 (≤ 444 bytes) |
+| R-MEM | 1 | DER X.509 client cert for ECC slot 0 (≤ 444 bytes, the PKCS#11 module's limit) |
 | R-MEM | 2–31 | DER certs for ECC slots 1–30 (if used) |
 | R-MEM | 32–511 | General-purpose user data |
 
@@ -145,6 +149,8 @@ CMAKE_OPTIONS += \
 
 Change `TS_SPI_DEV`, `TS_GPIO_DEV`, or `TS_GPIO_CS_PIN` for different boards.
 
+The slot-0 key is chosen at run time (patch 009): `es01` unless `$TROPICCTL_SH0` or `/etc/tropic01/slot0-key` says `prod0`.
+
 ### Build Outputs
 
 - `build/openwrt/build_dir/target-aarch64_cortex-a53_musl/libtropic-pkcs11-*/libtropic_pkcs11.so` (151KB)
@@ -152,7 +158,7 @@ Change `TS_SPI_DEV`, `TS_GPIO_DEV`, or `TS_GPIO_CS_PIN` for different boards.
 
 ### "No space left on device" when installing packages post-boot
 
-This means the overlay is too small for an `opkg install` done after
+This means the overlay is too small for a package installed (`apk add`) after
 flashing. It is not an issue for anything this feed selects with `=y` in a
 config fragment: those build straight into the read-only squashfs base, no
 runtime install or `files/` overlay copying needed. See
@@ -168,7 +174,7 @@ All provisioning steps run **on the router** over SSH.
 
 ```bash
 tropicctl info chip
-# There is no separate "connectivity" flag — -i prints the chip
+# There is no separate "connectivity" flag — `info chip` prints the chip
 # identification block; a successful read confirms SPI/GPIO wiring and
 # pairing keys both work. Expected: lines like
 #   P/N (long)  = 0x0B54524F50494330312D4553FFFFFFFF (TROPIC01-ES)
@@ -182,7 +188,7 @@ tropicctl info chip
 
 ```bash
 tropicctl ecc generate 0 --curve p256
-# Expected: lt_ecc_key_generate() : LT_OK
+# Expected: ecc slot 0: generated a p256 key; public key <hex>
 ```
 
 The private key is generated inside TROPIC01 and **cannot be exported**.
@@ -191,7 +197,7 @@ The private key is generated inside TROPIC01 and **cannot be exported**.
 
 ```bash
 tropicctl ecc pub 0 --out /tmp/tropic_pub.bin
-# Expected: Curve: P256, Number of elements written: 64
+# Writes the 64-byte X||Y public key; nothing is printed
 ```
 
 Copy to build host: `scp root@<router-ip>:/tmp/tropic_pub.bin /tmp/`
@@ -207,7 +213,7 @@ To install a profile without editing configs by hand, use
 
 Rules that apply to every step that writes the chip:
 
-- Key generation (`tropicctl ecc generate N`) --curve p256 and certificate storage (`tropicctl mem write N+1 --in file`)
+- Key generation (`tropicctl ecc generate N --curve p256`) and certificate storage (`tropicctl mem write N+1 --in file`)
   are irreversible for that slot: get explicit user confirmation first.
 - Every router needs a unique certificate CN.
 - Never commit a filled-in `.ovpn`, certificates or keys.
@@ -225,7 +231,7 @@ Rules that apply to every step that writes the chip:
 make package PKG=pkcs11-test
 
 # Deploy to router
-scp build/openwrt/bin/targets/mediatek/filogic/packages/pkcs11-test root@<router-ip>:/usr/bin/
+# copy the built pkcs11-test package from build/openwrt/bin/packages/aarch64_cortex-a53/tropic01/ to the router and install it with the package manager
 ssh root@<router-ip> 'chmod +x /usr/bin/pkcs11-test'
 ```
 
@@ -333,7 +339,7 @@ C_GenerateRandom(session, randomData, sizeof(randomData));
 ## Known Pitfalls (Check Before Re-diagnosing)
 
 - **"No space on device" when installing packages post-boot**: this means a
-  package was `opkg install`ed at runtime instead of selected at build time.
+  package was installed at runtime (`apk add`) instead of selected at build time.
   Select it as `y` in the relevant `features/*/openwrt.config` fragment
   instead, so it builds into the read-only squashfs base — no `files/`
   overlay copying needed.
@@ -348,9 +354,10 @@ C_GenerateRandom(session, randomData, sizeof(randomData));
 - **`LT_L2_SPI_ERROR` from `tropicctl`**: Check physical SPI/GPIO wiring.
   Verify `/dev/spidev2.0` and `/dev/gpiochip0` exist on the target.
 
-- **`LT_HOST_SECURE_CHANNEL_SETUP` error**: Pairing keys mismatch — confirm firmware
-  was built with patch `003-use-engineering-sample-keys.patch` matching your chip's
-  provisioning (`ENGINEERING_SAMPLES_01`).
+- **Secure session refused (`LT_CRYPTO_ERR`)**: the slot-0 key does not match the chip. A chip with
+  production provisioning needs `prod0` (`/etc/tropic01/slot0-key`, `$TROPICCTL_SH0` or
+  `tropicctl --key prod0`). On a provisioned unit the shared key is restricted (exit 5); use the
+  per-unit key in `/etc/tropic01/`.
 
 - **`LT_L3_R_MEM_DATA_WRITE_WRITE_FAIL` on slot 0**: R-MEM slot 0 is hardware-protected
   on ES01 silicon. Use slot 1+.
@@ -370,7 +377,7 @@ C_GenerateRandom(session, randomData, sizeof(randomData));
 
 - TROPIC01 private keys are generated inside the secure element and **never exported** in plaintext.
 - All mTLS connections use P-256 keys with certificates issued by a private CA.
-- AWS IoT connections use mutual TLS on port 8883 with device certificates registered in AWS IoT Core.
+- AWS IoT is meant to use mutual TLS on port 8883; it does not work today (backlog 3.1).
 - OpenVPN uses `tls-crypt` (HMAC firewall) to prevent unauthenticated connection attempts.
 - Chip serial is embedded in PKCS#11 token label, binding VPN config to one specific physical chip.
 
@@ -410,7 +417,7 @@ To report a vulnerability: **security@tropicsquare.com** (see
 See [`CONTRIBUTING.md`](../../../CONTRIBUTING.md) for full guidelines. Quick reference:
 
 - **C code**: K&R braces, tabs for indentation, 80-column soft limit
-- **Shell scripts**: POSIX sh; `#!/bin/sh`; `set -e`; use `logger` for logging
+- **Shell scripts**: POSIX sh; `#!/bin/sh`; `set -eu`; use `logger` for logging
 - **Makefiles**: Follow OpenWrt package conventions; use `PKG_VERSION`, `PKG_HASH`, `PKG_SOURCE_URL`
 - **Patches**: `git format-patch` style; prefix with three-digit sequence + short verb (`001-fix-…`, `002-add-…`)
 - **Commits**: [Conventional Commits](https://www.conventionalcommits.org/) format

@@ -25,9 +25,10 @@ These are enforced by instruction, not by the tooling. Check what the agent prop
 
 The agent must **stop and ask you** before:
 
-- anything irreversible on the chip: invalidating pairing key slots, erasing key slots
-  or R-MEM, incrementing monotonic counters, generating a key or storing a certificate
-  in a slot
+- anything irreversible or hazardous on the chip: writing or invalidating pairing key slots,
+  erasing key slots or R-MEM, initialising or decrementing monotonic counters, clearing
+  I-config bits, updating the chip firmware, rewriting the R-config, generating a key or
+  storing a certificate in a slot
 - flashing a router
 - `git push`, creating or merging a pull request, publishing a release
 
