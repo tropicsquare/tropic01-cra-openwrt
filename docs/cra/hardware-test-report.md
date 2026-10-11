@@ -234,3 +234,21 @@ before every chip command.
 | Found: `sysupgrade` keeps settings but not `/etc/tropic01/` | the keep list has the OpenVPN files and the feature configs, but not the key directory: a vault image, a per-unit pairing key or the `slot0-key` setting does not survive an upgrade (the per-unit key would then lock the unit out of its own chip). Open: a keep.d entry and a note that backups then contain the pairing key. |
 
 Not run here: the console-driven `bench.py suite` (the serial console was silent); the same checks were done over SSH.
+
+### Spare chip: `tropic01-pairing` end to end (2026-10-11)
+
+`tropic01-pairing` (cra-04) run on the spare chip (firmware 2.2.0, key prod0), into pairing slot 3, the last free slot (slots 1
+and 2 hold earlier test keys). OpenVPN was stopped; the script and a fresh key pair were copied to `/tmp` on the router.
+
+| Step | Result |
+|---|---|
+| `status`, `provision` without flags | read-only; the unit key does not open a session yet, the shared key has full rights; the dry run writes nothing |
+| `provision` with both flags | slot 3 written and read back (one way); the per-unit key opens a session; R-config rewritten (27 objects, first configuration saved) and read back; chip restarted; **verified: the shared key is refused, the per-unit key works**; slot 0 restricted, not invalidated |
+| After the restriction | the shared key opens a session but is refused (exit 5) for R-MEM, the configuration, ECC and `pairing list`; the per-unit key lists R-MEM and the pairing slots |
+| Second `provision` | "already holds this unit's key", "already restricted; nothing to do" |
+| `undo` | dry run writes nothing; the real undo restored the first configuration; the shared key has its rights again after the restart; `status` says not restricted |
+| Provision and undo again | the written slot is reused, the restriction redone and verified, then undone: the chip is left usable |
+
+Found: with the shared key restricted, `status` printed a raw `LT_L3_UNAUTHORIZED` from `pairing list`; it now lists the
+slots with the per-unit key (sandbox test added). State left on the chip: pairing slot 3 holds a key whose private half
+was deleted, so no pairing slot is free; the R-config is the original.

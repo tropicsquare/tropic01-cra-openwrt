@@ -64,7 +64,7 @@ invalidated slot 0, so on every unit the shared key still works.
   `/etc/tropic01/rconfig-before.cfg`), restarts the chip (it loads its R-config at start-up), and checks that the shared key
   is refused and the per-unit key works; if not it restores the saved configuration. **Slot 0 is restricted, not
   invalidated.** The sandbox test (`tests/sandbox/pairing.sh`, 63 checks against the real `tropicctl` with its fake chip)
-  covers the gates; the steps it is built from were each run on a spare chip, **the script itself has not yet been run on a chip.**
+  covers the gates, and the script was run end to end on a spare chip (hardware report, 2026-10-11: provision into slot 3, shared key refused, per-unit key works, re-run, undo).
 - `/etc/tropic01/` is on the `sysupgrade` keep list (from the `tropicctl` package), so an upgrade that keeps settings keeps
   the per-unit key. A settings backup then contains the private pairing key: treat backups as credentials.
 

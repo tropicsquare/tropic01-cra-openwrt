@@ -77,6 +77,8 @@ check "and it is the original (shared key had all rights)" "0xffffffff" "$(grep 
 check "slot 0 was NOT invalidated" "no" "$([ -e chip/pairing/0.invalid ] && echo yes || echo no)"
 check "status says restricted" 0 "$(run status)"
 check_contains "in words" "refused for the configuration (restricted)" "$(cat err.txt)"
+check_absent "and shows no raw chip error (the slots are listed with the per-unit key)" "UNAUTHORIZED" "$(cat err.txt)"
+check_contains "and lists the unit's slot" "pairing slot 1: populated" "$(cat err.txt)"
 sum1="$(cksum < etc/rconfig-before.cfg)"
 check "provision again: already done, exit 0" 0 "$(run provision --yes-write-pairing-slot --yes-rewrite-r-config)"
 check_contains "and says so" "already restricted" "$(cat err.txt)"

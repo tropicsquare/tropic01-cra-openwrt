@@ -1,6 +1,6 @@
 # Per-unit pairing key: where it lives and how it is protected
 
-Design for backlog items 4.1 to 4.5. **Status (2026-10-11):** tier 0 is implemented as `tropic01-pairing` on `tropicctl` with sandbox tests, and its steps (pairing write, R-config rewrite with a restart, shared key refused, restore) and the tier-1 PIN session were run on a spare chip; the script itself has not been run on a chip. Answers from those runs are marked *measured*. Statements
+Design for backlog items 4.1 to 4.5. **Status (2026-10-11):** tier 0 is implemented as `tropic01-pairing` on `tropicctl` with sandbox tests, and its steps (pairing write, R-config rewrite with a restart, shared key refused, restore) and the tier-1 PIN session were run on a spare chip; the script was run end to end on a spare chip (2026-10-11). Answers from those runs are marked *measured*. Statements
 are marked *from the documents* (Tropic Square's PIN Verification Application Note ODN_TR01_app_002 and its
 hardened-authentication example), *from the libtropic 4.2 headers*, or *to verify on a spare chip*. The vendor
 documents are not copied into this repository; read them from Tropic Square.

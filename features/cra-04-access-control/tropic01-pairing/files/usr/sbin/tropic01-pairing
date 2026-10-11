@@ -103,7 +103,7 @@ cmd_status() {
 	if shared session test >/dev/null 2>&1; then
 		if shared_refused; then log "shared key: opens a session but is refused for the configuration (restricted)"
 		else log "shared key: has full rights (NOT restricted)"; fi
-		shared pairing list 2>&1 | sed 's/^/[tropic01-pairing] /' >&2
+		slots_list 2>&1 | sed 's/^/[tropic01-pairing] /' >&2
 	else
 		log "shared key: does not open a session"
 		[ "$UNIT_OK" = 1 ] && unit pairing list 2>&1 | sed 's/^/[tropic01-pairing] /' >&2

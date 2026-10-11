@@ -145,7 +145,7 @@ provisioning command `tropic01-pairing` with sandbox tests); **nothing is provis
 decision.
 
 - **4.1 Provision a per-unit pairing key** into slot 1 and read it back. *`tropic01-pairing provision` does it with gates and
-  a verified restriction of the shared key; its steps were run on a spare chip, the script itself not yet.* **Irreversible per
+  a verified restriction of the shared key; run end to end on a spare chip on 2026-10-11 (slot 3, restriction verified, undo works); not on a unit that is in use.* **Irreversible per
   unit** (a written slot cannot be rewritten; the write goes to I-Memory, which can fail
   silently on old firmware). Use a spare chip first. *S per unit.*
 - **4.2 Invalidate slot 0** (the shared engineering-sample key), only after 4.1 is verified
