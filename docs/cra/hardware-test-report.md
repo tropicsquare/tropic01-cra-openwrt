@@ -257,7 +257,7 @@ was deleted, so no pairing slot is free; the R-config is the original.
 
 The bench unit (TROPIC01-ES) now has a per-unit pairing key in slot 1 and an owner key in slot 3, and its shared key is
 restricted to PING; the PKCS#11 module, the vault and the OpenVPN tunnel work with the per-unit key. This was done with
-tooling from the secure-update branch and is recorded in detail there. Slot 0 was not invalidated.
+tooling from the secure-update work and is recorded in detail below (least-privilege runtime key). Slot 0 was not invalidated.
 
 ## cra-07 secure update on the spare chip (2026-10-11)
 

@@ -46,7 +46,8 @@ Commands: `tropic01-update status | check IMAGE | commit | keys install SLOT FIL
   something this code can enforce.
 - **Fail closed** means a unit with a dead or alarmed chip cannot be updated remotely.
 - Certificate validity windows and a wrong clock before NTP can refuse good images: see the design, section 4.
-- Only a spare chip has been provisioned, and the package is not in the default image (`openwrt.config` leaves it commented out).
+- Only the spare chip has an update root key and an initialised counter, and the package is not in the default image
+  (`openwrt.config` leaves it commented out).
 
 ## Building a signed image
 
@@ -62,7 +63,7 @@ Both directories must be outside any git work tree (the tools refuse otherwise).
 
 ## Tests
 
-`tests/sandbox/secure-update.sh` (66 checks, mutation-checked; includes keys from the host tool and an image signed exactly as
+`tests/sandbox/secure-update.sh` (71 checks, mutation-checked; includes keys from the host tool and an image signed exactly as
 `append-metadata` does) runs the tool with OpenWrt's `usign`, `ucert` and `fwtool`
 and the real `tropicctl` on its fake chip. It needs those host tools from an OpenWrt build tree (`OPENWRT_DIR`) and skips
 without them.

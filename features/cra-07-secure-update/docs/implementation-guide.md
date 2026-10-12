@@ -33,10 +33,9 @@ file is the work plan.
 
 ## 2. Where things stand
 
-- **Branch:** `feat/secure-update` in `/mnt/buildext/tmp/tropic01-public`, stacked on `docs/tropicctl-spec` (open PR to
-  `main`; `tropicctl` is not on `main` yet). When that PR merges, rebase this branch onto the updated `main`
-  (`git rebase --onto origin/main docs/tropicctl-spec feat/secure-update`) and re-run all tests.
-- **Done (milestone 1, commit `ccc2e77`):** the router side, sandbox-tested.
+- **Branch:** `feat/secure-update` in `/mnt/buildext/tmp/tropic01-public`, based on `main` (which has `tropicctl`, cra-04
+  and the keep-list entry). Rebase it on `main` again before each PR and re-run all tests.
+- **Done (milestone 1):** the router side, sandbox-tested.
 
 | File | Role |
 |---|---|
@@ -46,11 +45,12 @@ file is the work plan.
 | `tropic01-secure-update/files/etc/config/tropic01-update` | UCI: `enforce` (1), `key_slots` ('200 201'), `counter` (0), `start` (1000) |
 | `tropic01-secure-update/Makefile` | package, `DEPENDS:=+tropicctl +ucert +usign +fwtool` |
 | `openwrt.config` | the package is **commented out** on purpose (an unprovisioned unit would refuse every update) |
-| `tests/sandbox/secure-update.sh` | 58 checks; OpenWrt's real `usign`/`ucert`/`fwtool` + the real `tropicctl` on its fake chip |
+| `tests/sandbox/secure-update.sh` | 71 checks; OpenWrt's real `usign`/`ucert`/`fwtool` + the real `tropicctl` on its fake chip |
 
-- **Related, done elsewhere:** `/etc/tropic01/` is on the sysupgrade keep list (`features/core/tropicctl/files/keep.d`, on the
-  cra-04 branch `feat/cra-04-pairing-provisioning`, commit `b706fca`, not on this branch). The pending-free commit design
-  below does not need it, but provisioning files in `/etc/tropic01/` do.
+- **Related:** `/etc/tropic01/` is on the sysupgrade keep list (`features/core/tropicctl/files/keep.d`, on `main`). The
+  boot commit needs it: the slot-0 key setting there must survive an upgrade.
+- **Done (10.6, 2026-10-11):** least-privilege runtime key on the bench chip (design, section 7; hardware report);
+  `tropicctl config deny` builds the restricted configuration.
 - **Done (milestone 2):** OpenWrt patch `0003`, the harness step in `scripts/prepare.sh` (`TROPIC01_SIGNING_DIR`,
   `TROPIC01_IMAGE_SV`), `host-tools/tropic01-update-keys.sh`, sandbox checks for both (66 in total). Verified with a real build:
   signed image with `tropic01_sv` 1 accepted by `ucert -V` against the root; a build without the variables is unsigned and

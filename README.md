@@ -34,7 +34,7 @@ Each row is a folder under [`features/`](features/) with its own README.
 |---|---|---|---|---|
 | [core](features/core/) | n/a | the chip's software layer: `libtropic`, a PKCS#11 module, the `tropicctl` tool | the interface to the chip | working |
 | [cra-01-secure-defaults](features/cra-01-secure-defaults/) | 2(b) secure by default | closed WAN, SSH on the LAN only, a root password is forced before any shell, empty passwords are refused | **none today** (policy and configuration) | partial |
-| [cra-02-verified-boot](features/cra-02-verified-boot/) | 2(f), 2(c) integrity, rollback | signed boot and anti-rollback | planned: a monotonic counter for anti-rollback. It is **not** the boot root of trust | not started |
+| [cra-02-verified-boot](features/cra-02-verified-boot/) | 2(f) secure boot | the SoC and U-Boot check what they boot | **none:** it is **not** the boot root of trust | not started; whether this board's boot ROM can verify a signature is still to be found out |
 | [cra-03-key-storage](features/cra-03-key-storage/) | 2(e) confidentiality | OpenVPN client whose private key lives in the chip | **central:** generates the key, signs inside the chip, stores the certificate | done for OpenVPN |
 | [cra-04-access-control](features/cra-04-access-control/) | 2(d) authentication | per-unit keys for talking to the chip | **central:** pairing keys and access privileges | partial: per-unit key on the bench unit and a spare chip; slot 0 restricted, not invalidated |
 | [cra-05-secure-erase](features/cra-05-secure-erase/) | 2(m) secure data removal | an encrypted vault that can be destroyed cryptographically | **central:** random key and key storage, erased on destroy | partial: one folder, not the whole disk |
@@ -51,7 +51,7 @@ Tested on a real OpenWrt One with a TROPIC01 engineering sample (see the
 the OpenVPN tunnel with the key in the chip (including key generation, a chip-signed certificate request
 and storing the certificate), the encrypted vault and its crypto-erase, and the security log.
 
-**Not done, and said plainly:** verified boot and rollback protection (cra-02); per-unit chip pairing keys
+**Not done, and said plainly:** secure boot (cra-02); signed updates and rollback protection (cra-07) are not in the default image (no unit is provisioned for them by default); per-unit chip pairing keys
 are provisioned only on one bench unit and a spare chip (slot 0 restricted there, not invalidated), so on any other unit
 the shared key still works;
 only the vault folder is encrypted, not the whole device; AWS IoT telemetry does not work; and on a unit
