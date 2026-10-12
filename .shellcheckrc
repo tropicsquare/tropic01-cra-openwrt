@@ -1,0 +1,8 @@
+# shellcheck settings for the whole repository (found by shellcheck from any script below this directory).
+#
+# SC2015 (info): "A && B || C is not if-then-else". The scripts use `test && test || die "..."` on purpose for
+#   argument checks: die() exits, so C never runs after a true A && B. Older shellcheck versions (the one CI installs)
+#   report every such line; newer ones do not.
+# SC2317 (info): "command appears to be unreachable". False positive for functions that OpenWrt calls indirectly
+#   (config_foreach callbacks in 95-tropic01-secure-defaults) and for functions defined for a sourced hook in a test.
+disable=SC2015,SC2317
