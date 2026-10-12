@@ -12,7 +12,7 @@ Libtropic is the official SDK for TROPIC01 secure element written in C. It provi
 
 ## Package Details
 
-- **Version**: 3.0.0
+- **Version**: 4.2.0
 - **License**: BSD-3-Clause-Clear
 - **Upstream**: https://github.com/tropicsquare/libtropic
 
@@ -21,93 +21,69 @@ Libtropic is the official SDK for TROPIC01 secure element written in C. It provi
 To include libtropic in your OpenWrt build:
 
 ```bash
-make menuconfig
-# Navigate to: Libraries -> libtropic
-# Select <*> to include in build
-make package/libtropic/compile V=s
+make package PKG=libtropic
 ```
 
 ## Usage in Applications
 
 ### CMake Integration
 
-Libtropic is built as a static library without HAL/CAL. Your application must:
+Consumers build the pinned source tree, not a prebuilt library. The package
+installs the libtropic source under `$(STAGING_DIR)/usr/src/libtropic`.
+libtropic is configured by compile definitions that must match between the
+library and its users, so each consumer adds the tree with
+`add_subdirectory()` and picks its HAL and CAL from it. `tropicctl` and
+`libtropic-pkcs11` do this, with the Linux SPI HAL and the OpenSSL CAL.
 
-1. Link against libtropic
-2. Provide HAL (Hardware Abstraction Layer) implementation
-3. Provide CAL (Crypto Abstraction Layer) implementation
-
-Example CMakeLists.txt:
-
-```cmake
-# Add libtropic include directory
-include_directories(/usr/include/libtropic)
-
-# Add your application sources
-add_executable(myapp main.c)
-
-# Add CAL for MbedTLS v4
-set(CAL_SRCS
-    /usr/include/libtropic/cal/mbedtls_v4/lt_mbedtls_v4_common.c
-    /usr/include/libtropic/cal/mbedtls_v4/lt_mbedtls_v4_aesgcm.c
-    /usr/include/libtropic/cal/mbedtls_v4/lt_mbedtls_v4_sha256.c
-    /usr/include/libtropic/cal/mbedtls_v4/lt_mbedtls_v4_hmac_sha256.c
-    /usr/include/libtropic/cal/mbedtls_v4/lt_mbedtls_v4_x25519.c
-)
-
-# Add HAL for Linux SPI
-set(HAL_SRCS
-    /usr/include/libtropic/hal/linux/spi/libtropic_port_linux_spi.c
-)
-
-target_sources(myapp PRIVATE ${CAL_SRCS} ${HAL_SRCS})
-
-# Link libraries
-target_link_libraries(myapp
-    /usr/lib/libtropic.a
-    mbedtls
-    mbedcrypto
-)
-```
-
-### Makefile Integration
+Pass the tree in from the package Makefile:
 
 ```makefile
-CFLAGS += -I/usr/include/libtropic
-LDFLAGS += -L/usr/lib
-LDLIBS += -ltropic -lmbedtls -lmbedcrypto
+CMAKE_OPTIONS += -DLIBTROPIC_SRC=$(STAGING_DIR)/usr/src/libtropic
+```
 
-SRCS = main.c \
-       /usr/include/libtropic/cal/mbedtls_v4/lt_mbedtls_v4_common.c \
-       /usr/include/libtropic/cal/mbedtls_v4/lt_mbedtls_v4_aesgcm.c \
-       /usr/include/libtropic/cal/mbedtls_v4/lt_mbedtls_v4_sha256.c \
-       /usr/include/libtropic/cal/mbedtls_v4/lt_mbedtls_v4_hmac_sha256.c \
-       /usr/include/libtropic/cal/mbedtls_v4/lt_mbedtls_v4_x25519.c \
-       /usr/include/libtropic/hal/linux/spi/libtropic_port_linux_spi.c
+Example CMakeLists.txt (as in `tropicctl/CMakeLists.txt`):
 
-myapp: $(SRCS)
-	$(CC) $(CFLAGS) $(SRCS) $(LDFLAGS) $(LDLIBS) -o myapp
+```cmake
+find_package(OpenSSL REQUIRED)
+
+add_subdirectory(${LIBTROPIC_SRC} libtropic)
+
+# CAL: OpenSSL
+add_subdirectory(${LIBTROPIC_SRC}/cal/openssl cal_openssl)
+target_sources(tropic PRIVATE ${LT_CAL_SRCS})
+target_include_directories(tropic PUBLIC ${LT_CAL_INC_DIRS})
+target_link_libraries(tropic PUBLIC OpenSSL::Crypto)
+
+# HAL: Linux SPI
+add_subdirectory(${LIBTROPIC_SRC}/hal/linux/spi linux_spi_hal)
+target_sources(tropic PRIVATE ${LT_HAL_SRCS})
+target_include_directories(tropic PUBLIC ${LT_HAL_INC_DIRS})
+
+add_executable(myapp main.c)
+target_link_libraries(myapp PRIVATE tropic OpenSSL::Crypto)
 ```
 
 ## Available HAL (Hardware Abstraction Layers)
 
-The package includes source files for multiple HAL implementations:
+The source tree includes several HAL implementations, among them:
 
-- **Linux SPI**: `/usr/include/libtropic/hal/linux/spi/`
-  - For hardware SPI communication on Linux
-- **POSIX TCP**: `/usr/include/libtropic/hal/posix/tcp/`
-  - For testing with TROPIC01 model over TCP
-- **POSIX USB Dongle**: `/usr/include/libtropic/hal/posix/usb_dongle/`
-  - For USB dongle communication
+- **Linux SPI**: `usr/src/libtropic/hal/linux/spi/`
+  - For hardware SPI communication on Linux (used here)
+- **POSIX TCP**: `usr/src/libtropic/hal/posix/tcp/`
+  - For testing with the TROPIC01 model over TCP
+- **POSIX USB devkit**: `usr/src/libtropic/hal/posix/usb_devkit/`
+  - For the USB devkit
 
-Choose the appropriate HAL for your hardware setup.
+Others in the tree: `hal/linux/spi_native_cs/`, `hal/mock/` and HALs for
+microcontroller platforms. Choose the one for your hardware setup.
 
 ## Available CAL (Crypto Abstraction Layers)
 
-The package includes CAL implementation for:
+- **OpenSSL**: `usr/src/libtropic/cal/openssl/`
+  - Used here (the package depends on `libopenssl`)
 
-- **MbedTLS v4**: `/usr/include/libtropic/cal/mbedtls_v4/`
-  - Requires MbedTLS library (automatically included as dependency)
+`cal/mbedtls_v4/`, `cal/trezor_crypto/` and `cal/wolfcrypt/` are also in the
+tree.
 
 ## Configuration Options
 
@@ -128,10 +104,10 @@ Full documentation is available at:
 
 ## Compatibility
 
-This package is compatible with:
-- TROPIC01 Bootloader FW: 1.0.0–2.0.0
-- TROPIC01 Application FW: 1.0.0
-- TROPIC01 SPECT FW: 2.0.1
+libtropic 4.2.0 is compatible with (from its upstream README):
+- TROPIC01 Bootloader FW: 1.0.1–2.0.1
+- TROPIC01 Application FW: 1.0.0–2.2.0
+- TROPIC01 SPECT FW: 1.0.0–1.3.0
 
 ## Support
 

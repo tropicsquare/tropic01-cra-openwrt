@@ -20,10 +20,15 @@ Phases 1 to 4 of [SPEC.md](SPEC.md).
   disabled in the I-config; reads the versions back); turn Maintenance Mode on or off in the R-config.
 - `--key prod0` and `--key es01`: the two slot-0 keys libtropic publishes (production and engineering sample); a refused
   shared key suggests prod0.
+- The slot-0 key setting: `/etc/tropic01/slot0-key` (`es01` or `prod0`), or `$TROPICCTL_SH0`. `--key shared` and the
+  fallback used when no per-unit key exists follow it; an unknown name is an error. The build default is
+  `TROPICCTL_DEFAULT_SH0` (`es01`).
 - Global options are accepted anywhere on the command line.
-- Global options `--json`, `--dry-run`, `--key`, `--lock-timeout`, device options; stable exit codes 0 to 10; data on
+- Global options `--json`, `--dry-run`, `--key`, `--lock-timeout`, `--pin-file`, `--pin-stdin`, `-q`, `-v`, `--no-lock`,
+  device options; stable exit codes 0 to 10; data on
   stdout, notices on stderr; a lock file around the chip.
 - Legacy mode when started as `lt-util`: every old command (`-i`, `-r`, `-e -i|-g|-d|-c|-s`, `-m -s|-r|-e`, `-k -r|-w`,
   `-x -r|-f`) with the old messages and exit status.
+- Package: an `lt-util` symlink, and `/lib/upgrade/keep.d/tropicctl`, which keeps `/etc/tropic01` across sysupgrade.
 - Generated reference (`docs/reference.md`) and manual page (`docs/tropicctl.1`), checked against the command table by
   the tests.

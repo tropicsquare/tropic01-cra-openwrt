@@ -18,7 +18,7 @@ is how "secure by design" turns into "secure by checklist".
 | [cra-01-secure-defaults](../../features/cra-01-secure-defaults/) | 2(b) | secure-by-default configuration, reset to original state | partial: attack-surface baseline + per-unit credential; reset integrity not started |
 | [cra-02-verified-boot](../../features/cra-02-verified-boot/) | 2(f), 2(c) | firmware integrity, rollback protection for security updates | not started |
 | [cra-03-key-storage](../../features/cra-03-key-storage/) | 2(e) | confidentiality of stored and transmitted data | done for OpenVPN: the key is generated and used inside TROPIC01, verified on hardware including the boot-time start; AWS IoT telemetry is moved to the backlog (3.1) and not claimed |
-| [cra-04-access-control](../../features/cra-04-access-control/) | 2(d) | authentication, identity, access control | partial: per-device identity done; pairing keys are shared fleet-wide, no UAP scoping |
+| [cra-04-access-control](../../features/cra-04-access-control/) | 2(d) | authentication, identity, access control | partial: per-device identity done; `tropic01-pairing` provisions a per-unit key and restricts the shared key (bench unit and a spare chip); slot 0 is not invalidated, other units still use the shared key |
 | [cra-05-secure-erase](../../features/cra-05-secure-erase/) | 2(m) | secure removal of user data and settings | partial: a small encrypted vault with a TROPIC01-held key and crypto-erase (verified on hardware); the rest of the overlay is not encrypted |
 | [cra-06-security-logging](../../features/cra-06-security-logging/) | 2(l) | security logging with a user opt-out | partial: event log, change audit and opt-out; not tamper-proof, no TROPIC01 involvement |
 
@@ -53,11 +53,14 @@ Three different things hide in this one sentence:
 
 ### 2(f) + 2(c) Integrity and rollback protection
 
-The immutable root of trust on MT7981 is the SoC boot ROM verifying a key
-fused into the SoC (BL2 → FIP → U-Boot → FIT image). **TROPIC01 does not
+On MT7981 an immutable root of trust would be the SoC boot ROM verifying a key
+fused into the SoC (BL2 → FIP → U-Boot → FIT image); whether this board can do that
+at all is still to be found out. **TROPIC01 does not
 anchor the boot chain** and this repo does not claim it does. What
 TROPIC01 can honestly add is a monotonic counter for anti-rollback, checked
-before an older signed image is accepted.
+before an older signed image is accepted. A counter only counts down, but
+`counter init` can be repeated, so this holds only if no obtainable pairing key
+keeps the right to initialise counters.
 
 ### 2(e) Confidentiality
 
@@ -68,10 +71,12 @@ device's TLS or VPN identity.
 ### 2(d) Authentication and access control
 
 Per-device identity (hardware key + X.509 certificate in TROPIC01 R-MEM) is
-in place. Host-to-chip access is not yet per-unit: every build uses the
-same published engineering-sample pairing key, and there is no User Access
-Privileges (UAP) scoping. That is the "checklist" pattern the project
-argues against, and cra-04 exists to fix it.
+in place. Host-to-chip access can now be per unit: `tropic01-pairing` writes a
+per-unit pairing key and rewrites the access rights so the shared slot-0 key
+loses them (restricted, not invalidated). It has run on the bench unit and a
+spare chip; any other unit still uses the published shared key, which is the
+"checklist" pattern the project argues against. Access rights for R-MEM are
+all-or-nothing per pairing key, not per slot.
 
 ### 2(m) Secure data removal
 

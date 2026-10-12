@@ -53,6 +53,10 @@ define Package/tropicctl/install
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/tropicctl $(1)/usr/bin/tropicctl
 	# started under this name the program accepts the old lt-util command line
 	$(LN) tropicctl $(1)/usr/bin/lt-util
+	# a sysupgrade that keeps settings must keep the key directory too (per-unit pairing key, slot-0 key setting, vault
+	# image); without this entry an upgrade deletes them and a unit with a per-unit key is locked out of its own chip
+	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
+	$(INSTALL_DATA) ./files/keep.d/tropicctl $(1)/lib/upgrade/keep.d/tropicctl
 endef
 
 $(eval $(call BuildPackage,tropicctl))

@@ -1,13 +1,15 @@
 # tropicctl
 
 A command-line tool for the [TROPIC01](https://tropicsquare.com/tropic01) secure element on Linux (SPI and GPIO). It
-reads chip and firmware information, gets random numbers, stores data in R-MEM, reads pairing keys and the chip
-configuration, and is built so that scripts can rely on it: stable exit codes, optional JSON, data on stdout and
+reads chip and firmware information, gets random numbers, manages ECC keys, R-MEM, pairing keys and the chip
+configuration, runs the PIN scheme (MAC-and-Destroy) and the monotonic counters, updates the firmware and restarts the
+chip. It is built so that scripts can rely on it: stable exit codes, optional JSON, data on stdout and
 notices on stderr, and a safety class on every command.
 
-**Status: phases 1 to 4 of [SPEC.md](SPEC.md) are implemented.** The read-only commands were run on a real chip. Everything
-that writes the chip (ECC keys, pairing keys, configuration rewrites, MAC-and-Destroy, counters) is tested against a
-hand-written fake chip only, until a spare chip is available; the fake labels each rule it is not sure of as *assumed*.
+**Status: phases 1 to 4 of [SPEC.md](SPEC.md) are implemented.** The read-only commands were run on the bench chip. The
+commands that write (ECC keys, R-MEM, pairing write, configuration rewrite, MAC-and-Destroy, counters, I-config burn,
+firmware update, `--key pin`) were run on a spare chip. `pairing invalidate` has not been run on a chip. The fake labels
+each rule it models as measured on a chip or *assumed*.
 
 ## Use
 
@@ -66,7 +68,7 @@ Inside this repository's OpenWrt feed the `Makefile` builds it as the package `t
 
 ## Tests
 
-`tests/run.sh` builds the fake-chip variant and runs the command and safety tests (about 370: JSON, exit codes, refusals,
+`tests/run.sh` builds the fake-chip variant and runs the command and safety tests (455 checks: JSON, exit codes, refusals,
 legacy mode, access rights, failure handling, ECC signatures verified by OpenSSL, the PIN scheme and the PIN-protected
 session). Every irreversible and hazardous guard has been checked by breaking it and seeing a test fail. The fake needs
 OpenSSL (libssl-dev) on the host. The fake labels each rule it models as measured on a chip or assumed;

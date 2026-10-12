@@ -1,13 +1,13 @@
-# Hardware-Backed VPN Router with TROPIC01 as Root of Trust
+# Hardware-Backed VPN Router: the Client Key in TROPIC01
 
 ## What the Solution Does
 
 This OpenWrt-based firmware turns a MediaTek MT7981B router (e.g. OpenWrt One) into a
 VPN client where **the TLS private key never exists as software**. Every TLS
 authentication operation uses a hardware-generated, hardware-bound P-256 key stored
-inside the **TROPIC01-ES** secure element. Standard software stack — OpenVPN, OpenSSL,
-and the PKCS#11 API — are used without modification; TROPIC01 is the only crypto
-backend that touches the private key.
+inside the **TROPIC01-ES** secure element. OpenVPN and OpenSSL are used as shipped; the
+PKCS#11 module carries this feed's patches. TROPIC01 is the only crypto backend that
+touches the private key.
 
 ---
 
@@ -62,17 +62,15 @@ During every OpenVPN TLS handshake, the client must sign a challenge with its pr
 key. The call chain is:
 
 ```
-OpenVPN → PKCS#11 (CKM_ECDSA) → libtropic_pkcs11.so → lt_ecc_ecdsa_sign_prehash() → TROPIC01 ECC slot 0
+OpenVPN → PKCS#11 (CKM_ECDSA) → libtropic_pkcs11.so → lt_ecc_ecdsa_sign() → TROPIC01 ECC slot 0
 ```
 
 TROPIC01 performs the raw ECDSA-P256 operation and returns only the 64-byte signature.
 The private key never crosses the SPI bus in either direction.
 
-A critical patch (`005-add-ecdsa-sign-prehash.patch`) was required here: OpenVPN passes
-a **pre-hashed** 32-byte SHA-256 digest via `CKM_ECDSA`, but the upstream PKCS#11
-module re-hashed the input before submitting to the chip, causing a double-hash and TLS
-authentication failure. The patch adds `lt_ecc_ecdsa_sign_prehash()` to accept the
-digest directly.
+OpenVPN passes a **pre-hashed** 32-byte SHA-256 digest via `CKM_ECDSA`. Patch
+`008-port-to-libtropic-4.2.patch` passes that hash to `lt_ecc_ecdsa_sign()`, which in
+libtropic 4.2 takes a 32-byte hash and does not hash again.
 
 ---
 
@@ -92,9 +90,8 @@ as a `CKO_CERTIFICATE` object. OpenVPN discovers it automatically via
 are bound to the chip — losing or replacing the TROPIC01 chip invalidates the router's
 VPN credentials entirely.
 
-The slot convention used: **ECC slot N → R-MEM slot N+1**. Slot 0 of R-MEM is
-read-protected on ENGINEERING_SAMPLES_01 silicon, so slot 1 is the first usable
-certificate store.
+The slot convention used: **ECC slot N → R-MEM slot N+1**. R-MEM slot 0 is not used:
+its behaviour on the bench chip is unclear (backlog 3.14).
 
 ---
 
@@ -137,7 +134,7 @@ CMake build time so no source editing is needed.
                                   private key never leaves
 3. tropicctl ecc pub 0 --out <file>       → export raw 64-byte public key (X‖Y)
 4. Wrap in SPKI DER/PEM        → build-host Python snippet
-5. openssl x509 --force_pubkey → CA signs cert binding TROPIC01 public key to a CN
+5. openssl x509 -force_pubkey  → CA signs cert binding TROPIC01 public key to a CN
 6. openssl x509 -outform DER   → convert to compact DER (~300 bytes)
 7. tropicctl mem write 1 --in client.der  → store cert in TROPIC01 R-MEM slot 1
 8. Write OpenVPN config         → pkcs11-providers + pkcs11-id directives
@@ -160,45 +157,28 @@ CMake build time so no source editing is needed.
 
 ## Custom Patches to `libtropic-pkcs11`
 
-Five patches adapt the upstream library for this SPI-based deployment:
+These patches (in `features/core/libtropic-pkcs11/patches/`) adapt the upstream library for this
+SPI-based deployment:
 
 | Patch | Purpose |
 |---|---|
 | `001-use-linux-spi-hal` | Replace USB HAL with Linux SPI HAL |
 | `002-use-spi-device-structure` | CMake-configurable SPI/GPIO device paths |
-| `003-use-engineering-sample-keys` | Select ENGINEERING_SAMPLES_01 pairing keys |
-| `004-add-cko-certificate-from-r-mem` | Expose cert from R-MEM slot 1 as PKCS#11 `CKO_CERTIFICATE` object |
-| `005-add-ecdsa-sign-prehash` | Accept pre-hashed digest from OpenVPN; prevent double-hashing |
+| `003-use-engineering-sample-keys` | Default slot-0 pairing key: ENGINEERING_SAMPLES_01 |
+| `004-add-cko-certificate-from-r-mem` | Expose the certificate in R-MEM slot N+1 as a PKCS#11 `CKO_CERTIFICATE` object |
+| `006-add-syslog-tracing` | Trace module calls to syslog |
+| `007-load-per-unit-pairing-key` | Use the per-unit pairing key from `/etc/tropic01/pairing.*` when present |
+| `008-port-to-libtropic-4.2` | Build against libtropic 4.2; sign the 32-byte hash with `lt_ecc_ecdsa_sign()` |
+| `009-select-slot0-key-at-runtime` | Choose the slot-0 key (`es01` or `prod0`) from `$TROPICCTL_SH0` or `/etc/tropic01/slot0-key` |
 
 ---
 
-## AWS IoT Context
+## AWS IoT (not working, not claimed)
 
-The `AWS/` directory contains AWS IoT device certificates. The active certificate
-(`0fd628986f...certificate.pem.crt`) was issued by **Amazon Web Services** (issuer
-`O=Amazon.com Inc.`, `L=Seattle`, `ST=Washington`, `C=US`) and identifies the subject:
-
-```
-CN=tropic01-router
-O=TropicSquare
-C=CZ
-```
-
-The public key embedded in this certificate (`id-ecPublicKey`, P-256) corresponds to
-the key held in TROPIC01 ECC slot 0. This means the same hardware key that signs VPN
-handshakes also authenticates the device to AWS IoT Core over MQTT-over-TLS (port 8883).
-
-The `libtropic_pkcs11.so` PKCS#11 module serves both use-cases identically:
-any TLS stack that supports PKCS#11 (OpenVPN, Mosquitto, AWS IoT Device SDK) can
-request a signature, and TROPIC01 performs it in hardware without exposing the key.
-
-```
-AWS IoT Core (MQTT/TLS)
-    │  TLS client auth — certificate: 0fd628986f...certificate.pem.crt
-    │  private key:      PKCS#11 → libtropic_pkcs11.so → TROPIC01 ECC slot 0
-    ▼
-AmazonRootCA1.pem / AmazonRootCA3.pem  (trust anchors, also in AWS/)
-```
+AWS IoT telemetry does not work yet and is not part of this feature's claim (backlog 3.1). It is
+meant to use its own key in **ECC slot 1**, with its certificate in **R-MEM slot 2**; the VPN uses
+ECC slot 0. The `aws/` directory holds only the Amazon root CAs. See
+[aws-iot-known-issues.md](aws-iot-known-issues.md).
 
 ---
 
@@ -219,8 +199,8 @@ AmazonRootCA1.pem / AmazonRootCA3.pem  (trust anchors, also in AWS/)
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
 | `LT_L2_SPI_ERROR` | Bad SPI wiring or wrong device node | Check `/dev/spidev2.0`, CS GPIO pin 25 |
-| `LT_HOST_SECURE_CHANNEL_SETUP` | Wrong pairing keys | Rebuild with `LT_SH0_KEYS=eng_sample` |
-| `LT_L3_R_MEM_DATA_WRITE_WRITE_FAIL` on slot 0 | R-MEM slot 0 is hardware-protected on ES01 | Use slot 1+ |
-| `OpenSSL: error:bad signature` on server | Double-hashing | Ensure patch `005-add-ecdsa-sign-prehash` is applied |
-| No cert found in `--show-pkcs11-ids` | Cert not stored or wrong slot | Re-run `tropicctl mem write 1`; --in verify `LT_OK` |
-| TLS handshake timeout (60 s) | Server-side `bad signature` | Prehash patch missing |
+| `LT_HOST_SECURE_CHANNEL_SETUP` | Wrong pairing key | Set `es01` or `prod0` in `/etc/tropic01/slot0-key`; a provisioned unit needs `/etc/tropic01/pairing.*` |
+| Anything on R-MEM slot 0 | Slot 0 is not used (backlog 3.14) | Use slot 1+ |
+| `OpenSSL: error:bad signature` on server | Double-hashing | Ensure patch `008-port-to-libtropic-4.2` is applied |
+| No cert found in `--show-pkcs11-ids` | Cert not stored or wrong slot | Re-run `tropicctl mem write 1 --in client.der`; it reads the slot back and says so |
+| TLS handshake timeout (60 s) | Server-side `bad signature` | Patch 008 missing |

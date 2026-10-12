@@ -232,9 +232,18 @@ def stripped_copy(path):
 
 
 def cmd_cra04(b, binary, host_ip):
-    """cra-04 on the real chip, read-only: tropicctl (installed, or pushed to /tmp), nothing is flashed or written."""
+    """cra-04 on the real chip, read-only: tropicctl (installed, or pushed to /tmp), nothing is flashed or written.
+
+    It needs an UNPROVISIONED unit: it plants test key files in /etc/tropic01 and deletes them afterwards. On a unit with a
+    per-unit key that would delete the only copy on the router (and the shared key is restricted there), so it refuses.
+    """
     if not b.ensure_shell():
         b.record("could not reach a shell", False)
+        return 1
+    rc, out = b.run("ls /etc/tropic01/pairing.key /etc/tropic01/pairing.pub /etc/tropic01/pairing.slot 2>/dev/null | wc -l")
+    if out.strip().split("\n")[-1] != "0":
+        b.record("cra04 refused: this unit has per-unit pairing key files in /etc/tropic01 (provisioned); "
+                 "the test would delete them", False)
         return 1
     if binary == "installed":
         tc = "/usr/bin/tropicctl"

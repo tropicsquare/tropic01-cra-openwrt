@@ -7,7 +7,7 @@ The libtropic-pkcs11 module provides access to cryptographic operations and data
 ## Current Status
 
 ✅ Module: `/usr/lib/libtropic_pkcs11.so`  
-✅ Device: `/dev/ttyACM0` (TROPIC01)  
+✅ Device: `/dev/spidev2.0` + `/dev/gpiochip0` pin 25 (TROPIC01 on SPI)  
 ✅ Initialized: Working
 
 ## Available Operations
@@ -124,20 +124,6 @@ rv = C_FindObjectsInit(session, pubKeyTemplate, 1);
 rv = C_FindObjects(session, &keyHandle, 1, &objectCount);
 rv = C_FindObjectsFinal(session);
 
-// For RSA public key
-CK_ATTRIBUTE rsaAttrs[] = {
-    {CKA_MODULUS, NULL, 0},
-    {CKA_PUBLIC_EXPONENT, NULL, 0}
-};
-rv = C_GetAttributeValue(session, keyHandle, rsaAttrs, 2);
-
-// Allocate and get actual values
-unsigned char *modulus = malloc(rsaAttrs[0].ulValueLen);
-unsigned char *exponent = malloc(rsaAttrs[1].ulValueLen);
-rsaAttrs[0].pValue = modulus;
-rsaAttrs[1].pValue = exponent;
-rv = C_GetAttributeValue(session, keyHandle, rsaAttrs, 2);
-
 // For EC public key
 CK_ATTRIBUTE ecAttrs[] = {
     {CKA_EC_PARAMS, NULL, 0},  // Curve parameters (OID)
@@ -148,45 +134,21 @@ rv = C_GetAttributeValue(session, keyHandle, ecAttrs, 2);
 
 ### 6. Perform Cryptographic Operations
 
+The module implements three mechanisms: `CKM_EC_KEY_PAIR_GEN`, `CKM_ECDSA`
+and `CKM_EDDSA`.
+
 #### Sign Data
 ```c
 // Initialize signing operation
-CK_MECHANISM mechanism = {CKM_SHA256_RSA_PKCS, NULL, 0};
+// 32-byte SHA-256 hash; longer input is cut to 32 bytes, shorter is CKR_DATA_LEN_RANGE
+CK_MECHANISM mechanism = {CKM_ECDSA, NULL, 0};
 rv = C_SignInit(session, &mechanism, privateKeyHandle);
 
-// Sign data
-unsigned char data[] = "Data to sign";
-unsigned char signature[256];
+// Sign the hash
+unsigned char hash[32];  // SHA-256 of the data, computed on the host
+unsigned char signature[64];
 CK_ULONG signatureLen = sizeof(signature);
-rv = C_Sign(session, data, sizeof(data), signature, &signatureLen);
-```
-
-#### Verify Signature
-```c
-CK_MECHANISM mechanism = {CKM_SHA256_RSA_PKCS, NULL, 0};
-rv = C_VerifyInit(session, &mechanism, publicKeyHandle);
-rv = C_Verify(session, data, dataLen, signature, signatureLen);
-```
-
-#### Encrypt Data
-```c
-CK_MECHANISM mechanism = {CKM_RSA_PKCS, NULL, 0};
-rv = C_EncryptInit(session, &mechanism, publicKeyHandle);
-
-unsigned char plaintext[] = "Secret data";
-unsigned char ciphertext[256];
-CK_ULONG ciphertextLen = sizeof(ciphertext);
-rv = C_Encrypt(session, plaintext, sizeof(plaintext), ciphertext, &ciphertextLen);
-```
-
-#### Decrypt Data
-```c
-CK_MECHANISM mechanism = {CKM_RSA_PKCS, NULL, 0};
-rv = C_DecryptInit(session, &mechanism, privateKeyHandle);
-
-unsigned char decrypted[256];
-CK_ULONG decryptedLen = sizeof(decrypted);
-rv = C_Decrypt(session, ciphertext, ciphertextLen, decrypted, &decryptedLen);
+rv = C_Sign(session, hash, sizeof(hash), signature, &signatureLen);
 ```
 
 #### Generate Random Data
@@ -195,16 +157,9 @@ unsigned char randomData[32];
 rv = C_GenerateRandom(session, randomData, sizeof(randomData));
 ```
 
-#### Compute Digest/Hash
-```c
-CK_MECHANISM mechanism = {CKM_SHA256, NULL, 0};
-rv = C_DigestInit(session, &mechanism);
+#### Verify, Encrypt, Decrypt, Digest
 
-unsigned char data[] = "Data to hash";
-unsigned char hash[32];  // SHA-256 = 32 bytes
-CK_ULONG hashLen = sizeof(hash);
-rv = C_Digest(session, data, sizeof(data), hash, &hashLen);
-```
+Verify, encrypt, decrypt and digest are not implemented by the module; verify on the host with OpenSSL.
 
 ## Quick Test Script
 
@@ -323,17 +278,12 @@ pkcs11-id 'serialized-id-of-key'
 
 ### OpenSSL with PKCS#11
 
-```bash
-# List keys
-openssl engine dynamic \
-  -pre SO_PATH:/usr/lib/engines-3/libpkcs11.so \
-  -pre ID:pkcs11 \
-  -pre LIST_ADD:1 \
-  -pre LOAD \
-  -pre MODULE_PATH:/usr/lib/libtropic_pkcs11.so
+Use `pkcs11-provider`, as `cra-03-key-storage` configures it:
 
-# Sign with PKCS#11 key
-openssl dgst -sha256 -sign "pkcs11:object=mykey" -out signature.bin data.txt
+```bash
+# Sign a 32-byte hash with the key in ECC slot 1
+OPENSSL_CONF=/etc/ssl/tropic01-aws/openssl-aws.cnf \
+  openssl pkeyutl -sign -inkey "pkcs11:id=%01;type=private" -in hash.bin -out sig.bin
 ```
 
 ## Documentation References
@@ -347,14 +297,12 @@ openssl dgst -sha256 -sign "pkcs11:object=mykey" -out signature.bin data.txt
 To get started with data operations:
 
 1. **Check what objects exist** on the token
-2. **Query supported mechanisms** (sign, encrypt, etc.)
+2. **Query supported mechanisms** (key generation, ECDSA, EdDSA)
 3. **Read public keys/certificates** if available
 4. **Perform cryptographic operations** (sign, verify, etc.)
 
 The module is working - you can now use it for:
-- Digital signatures
-- Data encryption/decryption
-- Certificate management
+- Digital signatures (ECDSA P-256, EdDSA Ed25519)
 - Key generation
 - Random number generation
-- Secure authentication
+- Reading certificates and data from R-MEM

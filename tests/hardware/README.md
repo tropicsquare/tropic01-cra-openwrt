@@ -8,7 +8,10 @@ else, and are **not** run in CI: CI has no board.
 python3 tests/hardware/bench.py probe          # classify the console, send only a newline
 python3 tests/hardware/bench.py cra01          # full cra-01 cycle (see below)
 python3 tests/hardware/bench.py web            # listener / web checks from the board itself
-python3 tests/hardware/bench.py cra04          # cra-04 checks on the chip with tropicctl (installed, or pushed to /tmp)
+python3 tests/hardware/bench.py cra04          # cra-04 checks on the chip with tropicctl (pushed to /tmp, or --binary installed)
+python3 tests/hardware/bench.py cra05 --phase stack   # vault encryption stack, no chip access
+python3 tests/hardware/bench.py cra06 --installed     # security log: real SSH and LuCI logins from the PC
+python3 tests/hardware/bench.py suite          # web, cra04, cra05 stack, cra06, cra01 against the installed packages
 python3 tests/hardware/bench.py capture --settle 600   # record a boot, send nothing
 ```
 
@@ -23,6 +26,9 @@ python3 tests/hardware/bench.py capture --settle 600   # record a boot, send not
   without being logged and never printed. It is a throwaway credential for
   a bench unit. Transcripts go in the same directory, outside the repo.
 - Nothing here touches TROPIC01 slots or any irreversible state.
+- **`cra04` (and so `suite`) needs an unprovisioned unit.** It plants test key files in `/etc/tropic01/` and deletes
+  them afterwards. On a unit with a per-unit key that would remove the only copy on the router, so it refuses when
+  `/etc/tropic01/pairing.*` exists.
 
 ## What `cra01` does
 
@@ -42,11 +48,11 @@ boot-time guard, and then checks, unattended:
 throwaway RAM image and a random key (no chip access); the chip steps (`init`,
 `destroy`) are done by hand because they write and erase R-MEM.
 
-`web` checks, from the board itself over loopback (the host cannot reach the
-router's LAN): SSH bound to the LAN address only, HTTP/HTTPS answering, rpcd
+`web` checks, from the board itself over loopback: SSH bound to the LAN address only, HTTP/HTTPS answering, rpcd
 rejecting an empty password.
 
-`cra04` uses the installed `tropicctl` (or pushes one to `/tmp` over the wired bench link with `--binary PATH`) and, with
+`cra04` pushes the built `tropicctl` to `/tmp` over the wired bench link (`--binary PATH` to choose it, `--binary installed`
+for the one in the image) and, with
 nothing flashed and nothing written to the chip, checks: the shared key still works
 with no key files; the four pairing slots can be inspected (read-only); unusable key
 files are refused without falling back; a wrong but well-formed key is rejected by the
@@ -81,6 +87,10 @@ and also allows real SSH/LuCI tests from the PC:
   switchable plug or relay on the supply would remove that.
 - **Flash.** Use failsafe (`f` + Enter at boot) and `sysupgrade`, or the
   U-Boot TFTP menu.
-- **Test from the LAN side.** SSH/LuCI logins from another machine need a
-  host NIC on the router's LAN subnet (a USB-Ethernet adapter in a network
-  namespace, which needs root once).
+- **Test from the LAN side without the wired link.** Only `cra06` logs in from the PC, and it needs the wired bench
+  link.
+
+## `cra06` and `suite`
+
+`cra06` logs in over SSH and LuCI from the PC (wired link) and checks what the security log records. `suite` runs web,
+cra04 (installed tropicctl), cra05 stack, cra06 (installed) and cra01, in that order.

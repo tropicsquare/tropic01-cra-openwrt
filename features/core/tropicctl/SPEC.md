@@ -1,8 +1,8 @@
 # tropicctl: a command-line tool for TROPIC01 on Linux (specification draft)
 
-**Status: all decisions made (section 12); phases 1 to 4 implemented. Phase 1 was run read-only on the bench chip; everything that writes the chip is tested against the fake chip only, until a spare chip is available.** This document defines what the tool does, how it behaves and how it
-is tested, so that the interface can be agreed before it is built. It replaces the patched `lt-util` that this feed
-carries today and is written so that it could also be used outside this project.
+**Status: all decisions made (section 12); phases 1 to 4 implemented. Phase 1 was run read-only on the bench chip; the commands that write were run on a spare chip (section 13).** This document defines what the tool does, how it behaves and how it
+is tested, so that the interface can be agreed before it is built. It replaced the patched `lt-util` this feed carried
+and is written so that it could also be used outside this project.
 
 ## 1. Why a new tool
 
@@ -35,7 +35,7 @@ carries today and is written so that it could also be used outside this project.
 - Not a PKCS#11 module or an OpenSSL provider (see backlog 3.11); it complements them.
 - Not a daemon. A broker that owns the single SPI session is backlog 3.12; until then the tool serialises with a lock
   file (section 6).
-- No firmware update in the first version (a later `fw` area, with its own safety review).
+- Firmware update is in version 1 (`fw`, section 7.10), with its own safety rules.
 - No USB DevKit support; Linux SPI and GPIO only.
 
 ## 3. Name, packaging, layout, build
@@ -60,14 +60,17 @@ carries today and is written so that it could also be used outside this project.
 
 ```
 CMakeLists.txt  Makefile (OpenWrt)  README.md  CHANGELOG.md  LICENSE
-src/main.c            argument parsing, dispatch, legacy mode (section 11)
+src/main.c            argument parsing and dispatch
+src/legacy.c          legacy mode (section 11)
 src/cmd_table.c       the command table: name, summary, usage, safety class, handler (the single source of truth)
 src/chip.h            the chip interface
 src/chip_libtropic.c  the real implementation (the only file that includes libtropic.h)
 src/chip_fake.c       the hand-written fake, for tests only
-src/session.c         choose the pairing key, start the session; the only place that does
+src/ctx.c             choose the pairing key, start the session; the only place that does
 src/keys.c            pairing key sources (shared, per-unit files, PIN-protected)
 src/lock.c            the lock file around the chip
+src/args.c            option extraction; an unknown option is a usage error
+src/files.c           reading and writing whole files ("-" is stdin or stdout; created files are 0600)
 src/output.c          text and JSON writers, error reporting
 src/errors.c          libtropic status -> exit code and message
 src/safety.c          confirmation flags, refusal rules, read-back helpers
@@ -77,7 +80,7 @@ src/cfgfile.c         configuration files (the raw words `config dump` prints)
 src/mnd.c             the PIN scheme of the application note
 src/pin.c             reading a PIN without the command line
 src/ecc_host.c        ECC with OpenSSL, used only by the fake chip
-src/cmd_info.c  cmd_rng.c  cmd_ecc.c  cmd_mem.c  cmd_pairing.c  cmd_config.c  cmd_mnd.c  cmd_counter.c  cmd_session.c  cmd_help.c
+src/cmd_info.c  cmd_rng.c  cmd_ecc.c  cmd_mem.c  cmd_pairing.c  cmd_config.c  cmd_mnd.c  cmd_counter.c  cmd_fw.c  cmd_session.c  cmd_help.c
 docs/                 generated manual page and reference
 tests/                unit tests, fake-chip command tests, hardware test scripts
 ```
@@ -110,7 +113,7 @@ Global options are accepted anywhere on the command line, before or after the co
 
 | Option | Meaning | Default |
 |---|---|---|
-| `--spi-dev PATH` | SPI device | `/dev/spidev2.0` (build-time default; also `TROPIC01_SPI_DEV`) |
+| `--spi-dev PATH` | SPI device | `/dev/spidev2.0` (build-time default; also `TROPICCTL_SPI_DEV`; likewise `TROPICCTL_GPIO_DEV`, `TROPICCTL_CS_PIN`, `TROPICCTL_SPI_SPEED`) |
 | `--gpio-dev PATH`, `--cs-pin N` | GPIO chip and chip-select line | `/dev/gpiochip0`, 25 |
 | `--spi-speed HZ` | SPI clock | 1000000 |
 | `--key SOURCE` | which pairing key opens the session (section 5) | `auto` |
@@ -119,6 +122,7 @@ Global options are accepted anywhere on the command line, before or after the co
 | `-q`, `-v` | quiet / verbose notices on stderr | normal |
 | `--lock-timeout SEC` | how long to wait for the chip lock | 10 |
 | `--dry-run` | check everything read-only, say what would be written, write nothing | off |
+| `--no-lock` | do not take the chip lock (section 6); for tests and debugging only | off |
 
 ### 4.3 Streams and exit codes
 
@@ -147,7 +151,7 @@ each command.
 |---|---|---|
 | **R** read-only | changes nothing on the chip | none |
 | **W** reversible write | can be undone by another command (an R-MEM slot, an ECC key) | none, but `--dry-run` is available |
-| **I** irreversible | cannot be undone: pairing-slot write or invalidation, I-config bit, counter initialisation | `--yes-<operation>` (named per operation, section 7); the target must be re-read first and found in the expected state |
+| **I** irreversible | cannot be undone: pairing-slot write or invalidation, I-config bit, counter initialisation, firmware update | `--yes-<operation>` (named per operation, section 7); the target must be re-read first and found in the expected state |
 | **H** hazardous | can leave the chip unusable if done wrong: rewriting R-config | the same flag, plus the tool performs the safe sequence itself (erase then write then read back); never exposed as a raw write |
 
 ### 4.5 Secrets
@@ -162,8 +166,10 @@ One invocation opens one secure session and closes it. The key source is `--key`
 
 | Source | Meaning |
 |---|---|
-| `auto` (default) | per-unit key files if they exist (`/etc/tropic01/pairing.key`, `.pub`, `.slot`), else the shared engineering-sample key with a warning on stderr. **Files that exist but are unusable are an error, never a silent fallback** (kept from today) |
-| `shared` | the shared engineering-sample key (slot 0); needed to write the per-unit key |
+| `auto` (default) | per-unit key files if they exist (`/etc/tropic01/pairing.key`, `.pub`, `.slot`), else the shared slot-0 key named by `$TROPICCTL_SH0` or `/etc/tropic01/slot0-key` (`es01` or `prod0`) with a warning on stderr. **Files that exist but are unusable are an error, never a silent fallback** (kept from today) |
+| `shared` | the shared slot-0 key named by `$TROPICCTL_SH0` or `/etc/tropic01/slot0-key` (`es01` or `prod0`); needed to write the per-unit key |
+| `es01` | the engineering-sample slot-0 key published with libtropic |
+| `prod0` | the production slot-0 key published with libtropic (chips with production provisioning) |
 | `unit` | the per-unit key files only; error if absent |
 | `file:PATH:SLOT` | an explicit key file and slot |
 | `pin` | the PIN-protected key of tier 1 in the cra-04 design: open a bootstrap session with the per-unit key, run MAC-and-Destroy with the PIN (`pin.state`, optional `pin.add`), decrypt the protected private key (`protected.enc`, sealed with `mnd seal`) for the pairing slot in `protected.slot`, end the bootstrap session and open the real one. A wrong PIN uses an attempt; with none left the key can never be opened again |
@@ -173,8 +179,8 @@ One invocation opens one secure session and closes it. The key source is `--key`
 ## 6. Serialising access to the chip
 
 The chip allows one secure session at a time. Until a broker exists the tool takes an exclusive `flock` on
-`/var/lock/tropicctl.lock` for the whole invocation and waits up to `--lock-timeout`; the PKCS#11 module is expected to
-take the same lock. This turns "chip busy" from a mystery failure into exit code 3 with a clear message.
+`/var/lock/tropicctl.lock` for the whole invocation and waits up to `--lock-timeout`. The PKCS#11 module does not take the
+lock yet (no patch does). `--no-lock` is for tests only. This turns "chip busy" from a mystery failure into exit code 3 with a clear message.
 
 ## 7. Command reference
 
@@ -187,7 +193,7 @@ Arguments in `<>` are required. Slot numbers are validated before the chip is to
 | `info chip` | chip identification (what `lt-util -i` prints), as text or `--json` |
 | `info fw` | RISC-V and SPECT firmware version bytes as the chip reports them, and the version they stand for (byte 3 . byte 2 . byte 1, as libtropic's own example prints it) |
 | `info cert [--out-dir DIR]` | the chip's certificate store: the length of each certificate, and with `--out-dir` each as `certN.der`; verifying the chain is not done |
-| `info mode` | whether the chip is in application, maintenance or start-up mode |
+| `info mode` | whether the chip is in application or maintenance mode |
 
 ### 7.2 `rng` (R)
 
@@ -204,7 +210,7 @@ Arguments in `<>` are required. Slot numbers are validated before the chip is to
 | `ecc erase <slot> --yes-erase-ecc-key` | **I** | destroys the key for good (a generated key cannot be recreated), checks the slot reads empty |
 | `ecc sign <slot> --in FILE [--out FILE\|-] [--alg ecdsa\|eddsa] [--digest] [--der]` | R | ECDSA signs a 32-byte hash (the input is hashed with SHA-256 unless `--digest` says it already is a digest); EdDSA signs the message (up to 4095 bytes). The algorithm follows the slot's curve; a mismatch is refused, not answered wrongly. Output is 64 raw bytes, or DER with `--der` |
 
-### 7.4 `mem` (R-MEM data slots 0 to 511; 444 bytes, 475 on libtropic 4.2)
+### 7.4 `mem` (R-MEM data slots 0 to 511; up to 475 bytes each with libtropic 4.2)
 
 | Command | Class | Does |
 |---|---|---|
@@ -232,7 +238,7 @@ prints, so nothing is invented between the file and the chip.
 
 | Command | Class | Does |
 |---|---|---|
-| `config dump [--decode]` | R | every R-config and I-config object (`R\|I NAME 0xVALUE`); `--decode` adds which keys may use each command on which target group |
+| `config dump [--decode]` | R | every R-config and I-config object (`R\|I NAME 0xVALUE`); `--decode` adds which keys may use each command on which target group. Without the right to read the I-config only the `R` lines are printed |
 | `config get <name>` | R | one object (the `TR01_CFG_` prefix may be left out) |
 | `config diff --in FILE [--check]` | R | compare the chip's R-config with a file, naming which pairing keys gain or lose access; `--check` exits 8 if anything differs |
 | `config restrict-shared --unit-slot N [--out FILE\|-]` | R | build a file from the chip's current R-config with pairing key 0 (the shared key) removed from every access object except PING. Refuses unless slot N holds a key and has the right to read and rewrite the configuration. Changes nothing on the chip |
@@ -242,6 +248,9 @@ prints, so nothing is invented between the file and the chip.
 
 There is no raw "write one R-config object" command, because the chip's erratum makes it dangerous: only
 `chip_rconfig_rewrite()` writes the R-config, and it always erases first.
+
+The chip loads its R-config at start-up: a `config rewrite` or `config restore` is in force only after `chip reboot`
+(measured on a spare chip).
 
 ### 7.7 `mnd`: MAC-and-Destroy (PIN verification)
 
@@ -279,6 +288,15 @@ That is a configuration step (`config rewrite`), not something this command does
 
 See section 5. Class R.
 
+### 7.10 `chip` and `fw`
+
+| Command | Class | Does |
+|---|---|---|
+| `chip reboot` | W | restart the chip, so that a rewritten R-config is loaded; ends any session, no key needed |
+| `fw status` | R | RISC-V and SPECT firmware versions, silicon revision, whether this build's update images fit it, and the chip mode; no session needed |
+| `fw update (--dir DIR \| --cpu FILE --spect FILE) --yes-update-firmware [--enable-maintenance] [--disable-maintenance] [--backup FILE]` | **I** | update both mutable firmware banks from the signed images libtropic ships. A chip never accepts an older version. Refuses images for another silicon revision, a downgrade, and a chip whose I-config has Maintenance Mode disabled. `--enable-maintenance` turns it on in the R-config first; `--disable-maintenance` turns it off after the update has been read back |
+| `fw maintenance <on\|off> --yes-rewrite-r-config [--backup FILE]` | **H** | turn Maintenance Mode on or off in the R-config START_UP object (backup, erase, write, read back, restart) |
+
 ## 8. Output formats
 
 Text is one fact per line. JSON is one object on stdout; errors are an object on stderr:
@@ -300,8 +318,10 @@ JSON field names are part of the interface and changes are listed in `CHANGELOG.
 
 ## 9. Documentation plan
 
-- `tropicctl help …` prints from the command table; `make man` produces the manual page from the same table.
-- `docs/guide.md`: first steps, key handling, a worked provisioning example, recovery notes (what a lost PIN means).
+- `tropicctl help …` prints from the command table; `tests/gen-docs.sh` writes the manual page (`docs/tropicctl.1`)
+  and the reference from the same table. There is no `make man`.
+- `docs/guide.md` (not written yet): first steps, key handling, a worked provisioning example, recovery notes (what a
+  lost PIN means).
 - `docs/reference.md`: generated: every command, option, class, exit code.
 - `docs/safety.md`: the safety classes, the chip hazards (R-config erase-before-write, one-way I-config bits, slots
   written once) and why each rule exists.
@@ -326,7 +346,7 @@ Rules for the fake, so it cannot give false comfort:
   report is the first such comparison).
 
 Rules for every **I** and **H** command: a test that it refuses without its flag, and a mutation check showing that
-breaking the guard makes a test fail (as done for the `tropic01-pairing` draft).
+breaking the guard makes a test fail (as done for `tropic01-pairing`).
 
 ## 11. Migration from `lt-util` (inheriting its commands)
 
@@ -355,14 +375,14 @@ legacy mode, except the two survey commands that already exist (`-x -r`, `-x -f`
 | `lt-util -x -f` | `tropicctl info fw` |
 | `LT_UTIL_FORCE_SHARED_KEY=1` | `--key shared` (the variable stays honoured in legacy mode) |
 
-Callers to move, and what each depends on today:
+Callers and what each used (moved in phase 3):
 
 | Caller | Uses | Note |
 |---|---|---|
 | `tropic01-vault` | `-i`, `-r`, `-m -s/-r/-e` | exit status only; slot 100 only |
 | `tests/hardware/bench.py` (`cra04`) | `-i`, `-m -r`, `-k -r/-w`, message texts such as "Error sec channel" and "per-unit pairing key, slot" | must switch to exit codes and `--json` |
-| `tropic01-pairing` (draft) | `-i`, `-k -r/-w`, `-m -r`, `-e -d`, `-x -r/-w` | becomes a thin wrapper around `tropicctl pairing`, `config rewrite` and `config restore` |
-| `tropic01-aws-provision` | `lt-util --generate-key --slot 1`, `--write-data --slot 2 --file …` | **these long options never existed**; rewrite against the new interface (backlog 3.1) |
+| `tropic01-pairing` | `-i`, `-k -r/-w`, `-m -r`, `-e -d`, `-x -r/-w` | now runs on `tropicctl pairing`, `config rewrite` and `config restore` |
+| `tropic01-aws-provision` | `lt-util --generate-key --slot 1`, `--write-data --slot 2 --file …` | **these long options never existed**; now runs on `tropicctl ecc generate` and `mem write` |
 | user guides and skills (about 20 documents) | `-e -g`, `-e -d`, `-m -s`, `-i` | search and replace, checked by the link and example checks |
 
 ## 12. Decisions
@@ -376,8 +396,8 @@ Decided by the project owner on 2026-10-10:
 
 Confirmed by the project owner on 2026-10-10 (proposals accepted):
 5. **JSON output** is in version 1.
-6. **Lock file** `/var/lock/tropicctl.lock` is the stop-gap around the chip; the PKCS#11 module is patched to take it
-   too. `--no-lock` exists for tests and debugging only.
+6. **Lock file** `/var/lock/tropicctl.lock` is the stop-gap around the chip. The PKCS#11 module does not take it yet
+   (no patch does). `--no-lock` exists for tests and debugging only.
 7. **No raw R-config write command**, even for experts.
 
 ## 13. Phases and acceptance
@@ -388,11 +408,10 @@ Version 1.0 contains every area. Status on 2026-10-11:
 |---|---|---|
 | 0 | specification reviewed; decisions 1 to 7 made | **done** |
 | 1 | skeleton, chip interface and fake, `info`, `rng`, `mem`, `pairing list/read`, `config dump`, `session test`, legacy mode for the read-only and R-MEM commands, generated help and manual page | **done**; run read-only on the bench chip |
-| 2 | `ecc`, `pairing write/invalidate`, `config get/diff/restrict-shared/rewrite/restore/burn`, the rest of legacy mode, guard-breaking tests | **done against the fake chip** (signatures verified by OpenSSL; every guard checked by mutation); **not run on a spare chip**; the real-chip build compiles |
+| 2 | `ecc`, `pairing write/invalidate`, `config get/diff/restrict-shared/rewrite/restore/burn`, the rest of legacy mode, guard-breaking tests | **done**; run on a spare chip on 2026-10-10 (ECC, R-MEM, pairing write, `config restrict-shared`/`rewrite`/`restore`, `config burn`); `pairing invalidate` not run on a chip |
 | 3 | callers migrated (vault, AWS provisioning script, bench, docs); the `lt-util` package and its patches retired; `lt-util` kept as a symlink | **done in the tree**; the bench's read-only `cra04` run and the vault run on the real chip pass on the new binary; the full hardware suite on a flashed image is still to run |
-| 4 | `mnd`, `counter`, PIN-protected sessions (`--key pin`) | **done against the fake chip**; not run on a spare chip |
+| 4 | `mnd`, `counter`, PIN-protected sessions (`--key pin`) | **done**; `mnd` and the counters run on a spare chip (counters only decrement; `counter init` can be repeated); `--key pin` works on a chip |
 
-What is still unconfirmed on a real chip, because it needs a write that is not safe on the bench unit: the access-word layout
-as the chip applies it (it is libtropic's own description), the effect of erasing the R-config, the MAC-and-Destroy sequence's
-behaviour with the host scheme, and the counter commands. Each fake rule that depends on one of these is marked `[assumed]`
-in `src/chip_fake.c`.
+Still unconfirmed on a real chip: `pairing invalidate`, the chip's own error for a counter update at zero (the tool
+refuses first), and that erasing the R-config returns the objects to the fake's defaults. Each fake rule that depends on
+one of these is marked `[assumed]` in `src/chip_fake.c`.

@@ -28,7 +28,7 @@ To include libtropic-pkcs11 in your OpenWrt build:
 make menuconfig
 # Navigate to: Libraries -> libtropic-pkcs11
 
-make package/libtropic-pkcs11/compile V=s
+make package PKG=libtropic-pkcs11
 ```
 
 ## Installation
@@ -37,14 +37,12 @@ The package installs the PKCS#11 module to `/usr/lib/libtropic_pkcs11.so`
 
 ## Usage Examples
 
-**Note**: The following examples require `pkcs11-tool` from the `opensc` package.
-To install it, enable **Utilities → opensc** in menuconfig.
+**Note**: The following examples use `pkcs11-tool` from `opensc`, which
+currently fails to build in this feed (see [../README.md](../README.md)). On
+the router, use `pkcs11-test` or `tropicctl` instead.
 
 ### Test Module
 ```bash
-# First, install opensc package for pkcs11-tool:
-# opkg install opensc
-
 pkcs11-tool --module /usr/lib/libtropic_pkcs11.so --show-info
 ```
 
@@ -93,7 +91,6 @@ The module is compiled with these defaults (set via CMake options in the Makefil
 | `TS_GPIO_DEV` | `/dev/gpiochip0` | GPIO chip for chip-select |
 | `TS_GPIO_CS_PIN` | `25` | GPIO pin number used as SPI CS |
 | `TS_SPI_SPEED` | `1000000` | SPI clock frequency in Hz (1 MHz) |
-| `LT_SH0_KEYS` | `eng_sample` | Pairing key set (`eng_sample` for ENGINEERING_SAMPLES_01) |
 | `LT_PKCS11_LOG_EN` | `ON` | Enable PKCS#11 logging |
 
 To change any of these, edit the `CMAKE_OPTIONS` block in the package `Makefile`.
@@ -104,14 +101,13 @@ This package requires:
 - `libtropic` - TROPIC01 SDK library
 - `libopenssl` - OpenSSL cryptographic library
 
-The libtropic package must be installed and configured before libtropic-pkcs11 can function.
+`libtropic` is needed at build time only: the module builds its source in.
 
 ### Optional Tools
 
 For testing and development:
-- `opensc` - Provides `pkcs11-tool` utility for testing PKCS#11 modules
-  - Enable in menuconfig: **Utilities → opensc**
-  - Or install: `opkg install opensc`
+- `pkcs11-test` - Minimal PKCS#11 smoke test
+- `opensc` - Provides `pkcs11-tool`; currently fails to build in this feed (see [../README.md](../README.md))
 
 ## Hardware Requirements
 
@@ -127,26 +123,33 @@ For testing and development:
 - Tested on: MediaTek MT7981B, OpenWrt One (aarch64 cortex-a53, `mediatek/filogic` target)
 - The SPI bus and GPIO must be enabled in the device tree / board configuration
 
-> **Note:** The default build uses `ENGINEERING_SAMPLES_01` pairing keys (`LT_SH0_KEYS=eng_sample`). This is required for ES01 silicon. Production chips require different keys.
+> **Note:** The module uses the published `ENGINEERING_SAMPLES_01` slot-0 pairing key by default. A production chip refuses it: set `echo prod0 > /etc/tropic01/slot0-key` (or `TROPICCTL_SH0=prod0`). A per-unit key in `/etc/tropic01/pairing.{key,pub,slot}` takes precedence over both.
 
 ## OpenSSL Integration
 
-To use with OpenSSL, you need a PKCS#11 provider like `libp11`. Configuration example:
+To use with OpenSSL 3, use the `pkcs11-provider` package. Configuration example (see `cra-03-key-storage`'s
+[openssl-aws.cnf](../../cra-03-key-storage/tropic01-aws/files/openssl-aws.cnf)):
 
 ```ini
 [openssl_init]
 providers = provider_sect
 
 [provider_sect]
+default = default_sect
 pkcs11 = pkcs11_sect
 
+[default_sect]
+activate = 1
+
 [pkcs11_sect]
-module = /usr/lib/libtropic_pkcs11.so
+module = /usr/lib/ossl-modules/pkcs11.so
+pkcs11-module-path = /usr/lib/libtropic_pkcs11.so
+activate = 1
 ```
 
 ## Security Note
 
-⚠️ The default pairing keys in libtropic are for development only. For production deployments, provision custom pairing keys in the TROPIC01 chip and update the keys in libtropic package.
+⚠️ The published slot-0 pairing keys are for development only. For production, provision a per-unit key with `tropic01-pairing` ([cra-04-access-control](../../cra-04-access-control/)); the module then loads it from `/etc/tropic01/pairing.{key,pub,slot}`.
 
 ## Troubleshooting
 
@@ -165,16 +168,16 @@ chmod 666 /dev/spidev2.0
 chmod 666 /dev/gpiochip0
 ```
 
-### `LT_L2_SPI_ERROR` — SPI communication failure
+### `LT_HAL_ERROR` — SPI communication failure
 1. Check wiring: MOSI, MISO, SCLK, CS all connected
 2. Confirm CS GPIO pin matches `TS_GPIO_CS_PIN` (default: 25)
 3. Lower SPI speed: set `TS_SPI_SPEED=500000` in the Makefile and rebuild
 4. Verify `/dev/spidev2.0` maps to the correct SPI bus in the device tree
 
-### `LT_HOST_SECURE_CHANNEL_SETUP` — Pairing key mismatch
-The firmware was not built with the correct pairing keys for this chip batch.
-For **ENGINEERING_SAMPLES_01** silicon, ensure `LT_SH0_KEYS=eng_sample` is set
-(this is the default in the Makefile).
+### `LT_CRYPTO_ERR` on session start — pairing key mismatch
+The chip does not answer to the slot-0 key the module uses. Check which one it
+answers to with `tropicctl session test` (try `--key prod0`), then set it in
+`/etc/tropic01/slot0-key`.
 
 ### Module Not Found
 Verify installation:
@@ -182,8 +185,9 @@ Verify installation:
 ls -la /usr/lib/libtropic_pkcs11.so
 ```
 
-### `LT_L3_R_MEM_DATA_WRITE_WRITE_FAIL` on slot 0
-R-MEM slot 0 is read-protected on ENGINEERING_SAMPLES_01. Use slot 1 or higher.
+### Writing R-MEM slot 0 fails
+R-MEM slot 0 is not used (documented as read-protected on ENGINEERING_SAMPLES_01; on the bench chip it read back
+slot 1's data, backlog 3.14). Use slot 1 or higher.
 
 ## Documentation
 

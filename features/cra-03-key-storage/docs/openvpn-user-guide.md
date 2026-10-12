@@ -18,9 +18,10 @@ engineering sample, 2026-10-05). The table at the end summarises it, including a
 
 - The client's **private key is generated in the chip and cannot be exported**. A copy of the
   flash, or of the `.ovpn` profile, does not contain it, and cannot be used to impersonate the router.
-- The chip signs for **whoever can open a session to it**. Today every unit uses the shared
-  engineering-sample pairing key (cra-04: nothing is provisioned), so someone with physical access to
-  the board can make the chip sign. Keep the router physically safe until cra-04 provisioning is done.
+- The chip signs for **whoever can open a session to it**. Units that are not provisioned answer to the
+  shared engineering-sample pairing key. Provisioned units (cra-04) answer to their own key, which is on
+  the router's flash. Either way someone with physical access to the board can make the chip sign. Keep
+  the router physically safe.
 - The profile's **TLS key** (`tls-crypt`) and CA are not protected by the chip. They are stored on flash,
   mode `0600`, unencrypted.
 
@@ -42,7 +43,7 @@ OpenSSL and OpenVPN address the pair as **PKCS#11 id `%0N`** (the serialized id 
 | 1 | 2 | `%01` |
 | N | N+1 | `%0N` |
 
-R-MEM slot 0 is read-protected on these samples: never use it. Slots hold up to **444 bytes**.
+Do not use R-MEM slot 0: its behaviour is unclear (backlog 3.14). Slots hold up to **444 bytes**.
 
 **Pick a free slot.** See what is already in use before you generate anything:
 
@@ -237,7 +238,7 @@ rm -f /etc/openvpn/tropic01.conf /etc/openvpn/tropic01-ca.crt /etc/openvpn/tropi
 ```
 
 Ask the VPN operator to **revoke the certificate**. The key stays in the chip; clearing an ECC slot
-(`tropicctl ecc erase N`) --yes-erase-ecc-key and erasing its certificate (`tropicctl mem erase $((N+1))`) are irreversible. Both were run on a test
+(`tropicctl ecc erase N --yes-erase-ecc-key`) and erasing its certificate (`tropicctl mem erase $((N+1))`) are irreversible. Both were run on a test
 slot pair (4 and 5): afterwards the slot read as empty and every other slot was unchanged.
 
 ## 10. Troubleshooting
@@ -266,7 +267,7 @@ slot pair (4 and 5): afterwards the slot read as empty and every other slot was 
 | a signature made by the chip's key verifies with the stored certificate's public key | verified |
 | 7 installer, derived config, boot start, failure paths | verified |
 | 8 tunnel up, ping through it, up again after a reboot | verified |
-| 9 clearing the test slots (`-e -c 4`, `-m -e 5`) | verified; slots 0-3, R-MEM 1-2 and the vault slot untouched |
+| 9 clearing the test slots (`tropicctl ecc erase 4 --yes-erase-ecc-key`, `tropicctl mem erase 5`) | verified; slots 0-3, R-MEM 1-2 and the vault slot untouched |
 
 Steps 3-6 were run once on slots 4 and 5 with a throwaway CA (the resulting certificate was not used to connect to
 a real VPN, because that VPN's CA did not sign it); the connection test in steps 7-8 used the existing identity in

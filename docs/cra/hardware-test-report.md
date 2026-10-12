@@ -23,7 +23,7 @@ cra-05 and cra-06, how, and what was **not** tested. Written to be pasted into t
 | Step | Checks | What it covered |
 |---|---|---|
 | web | 6 | SSH bound to the LAN address only; HTTP and HTTPS answering (LuCI); rpcd rejects an empty password; dropbear bound to `lan`, password auth on |
-| cra-04 | 13 | the `lt-util` installed in the image; the pairing-slot write command refuses without `--irreversible`, for slot 0 and for a wrong-size file, **before any chip access**; shared key still works with no key files; slots 1-3 empty, slot 0 populated; unusable key files refused with no silent fallback; a wrong well-formed key is rejected by the chip; access restored afterwards |
+| cra-04 | 13 | the `lt-util` installed in the image (the old tool of that time); the pairing-slot write command refuses without `--irreversible`, for slot 0 and for a wrong-size file, **before any chip access**; shared key still works with no key files; slots 1-3 empty, slot 0 populated; unusable key files refused with no silent fallback; a wrong well-formed key is rejected by the chip; access restored afterwards |
 | cra-05 stack | 6 | LUKS2 on the board with a throwaway RAM image and a random key (no chip access): format, loop plus dm-crypt open, ext4 mount, no plaintext in the image file, reopen, wrong key refused |
 | cra-06 | 18 | package installed in the image: real SSH and LuCI logins (failed and successful) from the PC recorded; a config edit and a service enable/disable recorded by name only; size cap; opt-out stops recording; stored lines kept; `clear`; a copy of the log contained neither the real nor a wrong password |
 | cra-01 | 13 | a planted empty-password hash cleared by the boot-time guard **before** any login; empty password refused on every attempt and the session closing after five; real password accepted; `ttylogin` enforced and repaired; first-boot warnings removed |
@@ -51,8 +51,8 @@ Steps run by hand because they write or erase on the chip (each with an explicit
 ## Not tested
 
 - **AWS IoT telemetry:** was failing before this branch and was not retested (backlog 3.1).
-- **Provisioning:** no per-unit pairing key was written to the chip, slot 0 was not invalidated, no UAP was configured
-  (deliberate; cra-04's irreversible steps are deferred). The `libtropic-pkcs11` per-unit key path was not exercised at runtime.
+- **Provisioning:** not in this run (done later on a spare chip and on the bench unit, see the sections below). Slot 0
+  was never invalidated.
 - **Not built:** verified boot and rollback (cra-02), reset integrity, the LuCI first-login gate (on a unit with no password,
   the first person on the LAN can still choose it through LuCI), TROPIC01-anchored log signing, PIN-unlocked storage encryption.
   See [backlog.md](backlog.md).
@@ -197,7 +197,7 @@ commands are `tropicctl` built from the feed, run on the router over SSH.
 | Counters | uninitialised: exit 6; init 3, three updates reach 0, a fourth is refused by the tool before the chip is asked; 4294967294 accepted; **init can be repeated** (counter 5 went from 0 to 9). |
 | I-config burn | `config burn UAP_PING 31` on firmware 2.2.0: cleared and read back (I-config `0x7fffffff`). |
 
-Not run: `--key pin` on a chip, `pairing invalidate`, the chip's own error for an update at zero (the tool refuses first),
+Not run: `--key pin` on a chip (run later, see below), `pairing invalidate`, the chip's own error for an update at zero (the tool refuses first),
 host-state rollback of the PIN counter on a chip (the model confirmed it). State left on the spare chip: pairing slot 1
 holds a test key, MAC-and-Destroy slots 0 to 2 are used, counters 5 and 6 are initialised, I-config UAP_PING bit 31 is 0.
 
@@ -231,6 +231,30 @@ before every chip command.
 | Read-only `tropicctl` | `fw status`, session with the shared key, `pairing list` (slot 0 only), `rng get`, `mem list` (slots 0 to 2: 299, 299, 383 bytes), `ecc list` (4 keys), `config dump` (54 lines), `info cert` (4), `counter get 0` exit 6, `config burn` refused (firmware older than 2.0.0), `chip reboot` |
 | Vault | init (key in R-MEM slot 100, no plaintext in the image), lock, unlock, `destroy` without its flag refused, `destroy` erased slot 100 and deleted the image, **the old image put back was refused** |
 | OpenVPN with the key in the chip | the module lists the two certificates; the tunnel came up (`tun0` 10.8.0.2), the log shows "signature complete: 64 bytes produced by TROPIC01 hardware", the process holds `/dev/spidev2.0` and `/dev/gpiochip0`, 4 of 4 pings to the gateway (about 6.8 ms); the config has only `pkcs11-providers` and `pkcs11-id` (no `key`, no `cert`) |
-| Found: `sysupgrade` keeps settings but not `/etc/tropic01/` | the keep list has the OpenVPN files and the feature configs, but not the key directory: a vault image, a per-unit pairing key or the `slot0-key` setting does not survive an upgrade (the per-unit key would then lock the unit out of its own chip). Open: a keep.d entry and a note that backups then contain the pairing key. |
+| Found: `sysupgrade` keeps settings but not `/etc/tropic01/` | the keep list has the OpenVPN files and the feature configs, but not the key directory: a vault image, a per-unit pairing key or the `slot0-key` setting does not survive an upgrade (the per-unit key would then lock the unit out of its own chip). Fixed since: `/etc/tropic01/` is on the keep list (`lib/upgrade/keep.d/tropicctl`); a settings backup now contains the pairing key. |
 
 Not run here: the console-driven `bench.py suite` (the serial console was silent); the same checks were done over SSH.
+
+### Spare chip: `tropic01-pairing` end to end (2026-10-11)
+
+`tropic01-pairing` (cra-04) run on the spare chip (firmware 2.2.0, key prod0), into pairing slot 3, the last free slot (slots 1
+and 2 hold earlier test keys). OpenVPN was stopped; the script and a fresh key pair were copied to `/tmp` on the router.
+
+| Step | Result |
+|---|---|
+| `status`, `provision` without flags | read-only; the unit key does not open a session yet, the shared key has full rights; the dry run writes nothing |
+| `provision` with both flags | slot 3 written and read back (one way); the per-unit key opens a session; R-config rewritten (27 objects, first configuration saved) and read back; chip restarted; **verified: the shared key is refused, the per-unit key works**; slot 0 restricted, not invalidated |
+| After the restriction | the shared key opens a session but is refused (exit 5) for R-MEM, the configuration, ECC and `pairing list`; the per-unit key lists R-MEM and the pairing slots |
+| Second `provision` | "already holds this unit's key", "already restricted; nothing to do" |
+| `undo` | dry run writes nothing; the real undo restored the first configuration; the shared key has its rights again after the restart; `status` says not restricted |
+| Provision and undo again | the written slot is reused, the restriction redone and verified, then undone: the chip is left usable |
+
+Found: with the shared key restricted, `status` printed a raw `LT_L3_UNAUTHORIZED` from `pairing list`; it now lists the
+slots with the per-unit key (sandbox test added). State left on the chip: pairing slot 3 holds a key whose private half
+was deleted, so no pairing slot is free; the R-config is the original.
+
+### Bench unit: per-unit key (2026-10-11)
+
+The bench unit (TROPIC01-ES) now has a per-unit pairing key in slot 1 and an owner key in slot 3, and its shared key is
+restricted to PING; the PKCS#11 module, the vault and the OpenVPN tunnel work with the per-unit key. This was done with
+tooling from the secure-update branch and is recorded in detail there. Slot 0 was not invalidated.

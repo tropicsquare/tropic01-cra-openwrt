@@ -31,47 +31,64 @@ Select it in the image build with `CONFIG_PACKAGE_pkcs11-test=y`, or build
 and install it standalone on a running router:
 
 ```bash
-scp bin/targets/mediatek/filogic/packages/pkcs11-test root@<router-ip>:/usr/bin/
-ssh root@<router-ip> 'chmod +x /usr/bin/pkcs11-test'
+scp build/openwrt/bin/packages/aarch64_cortex-a53/tropic01/pkcs11-test-*.apk root@<router-ip>:/tmp/
+ssh root@<router-ip> 'apk add --allow-untrusted /tmp/pkcs11-test-*.apk'
 ```
 
 ## Usage
 
 ```bash
-pkcs11-test /path/to/module.so
+pkcs11-test --module /path/to/module.so [options]
 ```
+
+`--module` is required. Options:
+
+| Option | What it does |
+|---|---|
+| `--show-info` | Show module information (the default when no other option is given) |
+| `--test-init` | Test initialization and finalization |
+| `--list-objects` | List all objects in the token |
+| `--random N` | Get N random bytes from the token (1-1024) |
+| `--help`, `-h` | Show the help text |
 
 Example:
 ```bash
-pkcs11-test /usr/lib/libtropic_pkcs11.so
+pkcs11-test --module /usr/lib/libtropic_pkcs11.so
 ```
 
 ## Expected Output
 
 ```
-PKCS#11 Module Test
-==================
-
-Loading module: /usr/lib/libtropic_pkcs11.so
+Loading PKCS#11 module: /usr/lib/libtropic_pkcs11.so
 ✓ Module loaded successfully
+✓ C_GetFunctionList: OK
+  Cryptoki version: 2.40
 
-✓ C_GetFunctionList succeeded
-✓ C_Initialize succeeded
+Initializing module...
+✓ C_Initialize: OK
 
-Module Information:
-  Cryptoki Version: 2.40
-  Manufacturer ID:  Tropic Square
-  Library Description: Tropic PKCS#11 Module
-  Library Version:  0.1
+=== Module Information ===
+Cryptoki version: 2.40
+Manufacturer ID:  TropicSquare
+Library desc:     Tropic PKCS11
+Library version:  0.0
+Flags:            0x00000000
 
-✓ C_Finalize succeeded
+Finalizing module...
+✓ C_Finalize: OK
 
-All tests passed!
+=== Test Summary ===
+Module:     /usr/lib/libtropic_pkcs11.so
+Status:     PASSED
+The PKCS#11 module appears to be functional.
 ```
+
+`Status: PASSED` is printed whenever the tool reaches the end; check the `✓`
+lines and look for `Warning:` or `Error:` lines on stderr.
 
 ## Files
 
-- **src/pkcs11-test.c**: Source code (5.7KB)
+- **src/pkcs11-test.c**: Source code (about 16 KB)
 - **Makefile**: OpenWrt package definition
 
 ## Technical Details

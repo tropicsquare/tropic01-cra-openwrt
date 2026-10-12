@@ -1,0 +1,207 @@
+#!/bin/sh
+# tropic01-pairing -- guarded provisioning of a per-unit TROPIC01 pairing key (CRA Annex I 2(d)), on tropicctl.
+#
+#   tropic01-pairing status
+#   tropic01-pairing provision [--yes-write-pairing-slot] [--yes-rewrite-r-config] [--allow-old-firmware]
+#   tropic01-pairing undo      [--yes-rewrite-r-config]
+#
+# Every step that writes the chip is off by default: without its flag the command checks everything it can
+# (read-only) and says what it WOULD do.
+#
+#   provision  1. refuses chip firmware older than 2.0.0 (I-Memory writes can fail silently there) unless
+#                 --allow-old-firmware is given,
+#              2. writes /etc/tropic01/pairing.pub into the empty pairing slot named in pairing.slot (1 to 3) with the
+#                 shared slot-0 key: ONE WAY, the slot is used up; the slot is read back and compared
+#                 (--yes-write-pairing-slot); a slot that already holds this key is left alone,
+#              3. proves the per-unit key opens a session before anything is restricted,
+#              4. takes the shared key (slot 0) its rights by rewriting the R-config (tropicctl erases before it
+#                 writes; a backup of the first configuration is kept in /etc/tropic01/rconfig-before.cfg)
+#                 (--yes-rewrite-r-config), restarts the chip (it loads its R-config at start-up),
+#              5. checks that the shared key is now refused and the per-unit key still works. If not, it restores the
+#                 backup with the per-unit key and says so.
+#              Slot 0 is restricted, NOT invalidated: invalidation cannot be undone and is a separate decision.
+#   undo       puts the saved first configuration back (with the per-unit key) and restarts the chip.
+#
+# Files (directory override for tests: TROPIC01_DIR):
+#   pairing.key  32 raw bytes, private X25519 key (never printed)   pairing.pub  its public key   pairing.slot  1-3
+#   rconfig-before.cfg  the R-config before the first restriction (written by this tool)
+# Which slot-0 key the chip answers to (es01 or prod0) is set in slot0-key, see tropicctl.
+
+set -eu
+umask 077
+
+TC="${TROPIC01_PAIRING_TROPICCTL:-tropicctl}"
+DIR="${TROPIC01_DIR:-/etc/tropic01}"
+export TROPICCTL_KEY_DIR="$DIR"
+BACKUP="$DIR/rconfig-before.cfg"
+
+log() { echo "[tropic01-pairing] $*" >&2; logger -t tropic01-pairing "$*" 2>/dev/null || true; }
+die() { log "ERROR: $*"; exit 1; }
+would() { log "DRY RUN (nothing written): would $*"; }
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
+size_of() { wc -c < "$1" | tr -d ' '; }
+
+load_keys() {
+	[ -f "$DIR/pairing.key" ] && [ -f "$DIR/pairing.pub" ] && [ -f "$DIR/pairing.slot" ] ||
+		die "no per-unit key files in $DIR (pairing.key, pairing.pub, pairing.slot); generate them first with tropic01-gen-pairing-key.sh"
+	[ "$(size_of "$DIR/pairing.key")" = 32 ] || die "$DIR/pairing.key must be exactly 32 bytes"
+	[ "$(size_of "$DIR/pairing.pub")" = 32 ] || die "$DIR/pairing.pub must be exactly 32 bytes"
+	SLOT="$(tr -d ' \n' < "$DIR/pairing.slot")"
+	case "$SLOT" in
+	1 | 2 | 3) ;;
+	0) die "pairing.slot is 0: slot 0 holds the shared key and is never written by this tool" ;;
+	*) die "pairing.slot must be 1, 2 or 3 (got '$SLOT')" ;;
+	esac
+}
+
+shared() { "$TC" --key shared "$@"; }
+unit() { "$TC" --key unit "$@"; }
+
+# The pairing slots are read with the shared key; once the shared key has been restricted it may no longer read them
+# (exit 5), and the per-unit key does it. Any other failure is an error: a chip that does not answer is not "empty".
+slots_list() {
+	rc=0
+	out="$(shared pairing list 2>&1)" || rc=$?
+	if [ "$rc" -eq 5 ]; then
+		out="$(unit pairing list 2>&1)" || die "cannot read the pairing slots with either key: $out"
+	elif [ "$rc" -ne 0 ]; then
+		die "cannot read the pairing slots with the shared key: $out"
+	fi
+	printf '%s\n' "$out"
+}
+
+# state of pairing slot $1: empty | populated | invalidated; dies if it cannot tell
+slot_state() {
+	st="$(slots_list | sed -n "s/^pairing slot $1: \\([a-z]*\\).*/\\1/p")"
+	case "$st" in
+	empty | populated | invalidated) echo "$st" ;;
+	*) die "cannot tell the state of pairing slot $1" ;;
+	esac
+}
+
+# read the public key of pairing slot $1 into file $2, with whichever key may
+read_slot() {
+	shared pairing read "$1" --out "$2" >/dev/null 2>&1 && return 0
+	unit pairing read "$1" --out "$2" >/dev/null 2>&1
+}
+
+fw_major() {
+	out="$("$TC" fw status 2>&1)" || die "cannot read the firmware version: $out"
+	printf '%s\n' "$out" | sed -n 's/^RISC-V firmware \([0-9]*\)\..*/\1/p'
+}
+
+# the shared key is refused (exit 5) for a command that needs a right
+shared_refused() { rc=0; shared config dump >/dev/null 2>&1 || rc=$?; [ "$rc" -eq 5 ]; }
+
+cmd_status() {
+	load_keys
+	log "chip: $("$TC" fw status 2>&1 | sed -n 1,2p | tr '\n' ' ')"
+	if unit session test >/dev/null 2>&1; then log "per-unit key (slot $SLOT): opens a session"; UNIT_OK=1; else log "per-unit key (slot $SLOT): does NOT open a session"; UNIT_OK=0; fi
+	if shared session test >/dev/null 2>&1; then
+		if shared_refused; then log "shared key: opens a session but is refused for the configuration (restricted)"
+		else log "shared key: has full rights (NOT restricted)"; fi
+		slots_list 2>&1 | sed 's/^/[tropic01-pairing] /' >&2
+	else
+		log "shared key: does not open a session"
+		[ "$UNIT_OK" = 1 ] && unit pairing list 2>&1 | sed 's/^/[tropic01-pairing] /' >&2
+	fi
+	if [ -f "$BACKUP" ]; then log "saved first configuration: $BACKUP"; else log "no saved configuration yet"; fi
+	return 0
+}
+
+cmd_provision() {
+	W_SLOT=0 W_CFG=0 OLD=0
+	for a in "$@"; do
+		case "$a" in
+		--yes-write-pairing-slot) W_SLOT=1 ;;
+		--yes-rewrite-r-config) W_CFG=1 ;;
+		--allow-old-firmware) OLD=1 ;;
+		*) die "unknown option $a" ;;
+		esac
+	done
+	load_keys
+	major="$(fw_major)"
+	[ -n "$major" ] || die "cannot read the firmware version"
+	if [ "$major" -lt 2 ] && [ "$OLD" = 0 ]; then
+		die "the chip's CPU firmware is older than 2.0.0: I-Memory writes (a pairing slot) can fail silently there. Update it (tropicctl fw update) or pass --allow-old-firmware"
+	fi
+	st="$(slot_state "$SLOT")"
+	WRITE=0
+	case "$st" in
+	invalidated) die "pairing slot $SLOT was invalidated and can never be written again; choose another slot in pairing.slot" ;;
+	populated)
+		read_slot "$SLOT" "$TMP/slot.pub" || die "cannot read pairing slot $SLOT"
+		cmp -s "$TMP/slot.pub" "$DIR/pairing.pub" || die "pairing slot $SLOT already holds a different key; refusing to go on"
+		log "pairing slot $SLOT already holds this unit's key"
+		;;
+	empty) WRITE=1 ;;
+	esac
+	if [ "$WRITE" = 1 ]; then
+		if [ "$W_SLOT" = 0 ]; then
+			would "write $DIR/pairing.pub into pairing slot $SLOT (ONE WAY: the slot is used up); needs --yes-write-pairing-slot"
+			would "then check the per-unit key, restrict the shared key, restart the chip and verify"
+			return 0
+		fi
+		out="$(shared pairing write "$SLOT" --in "$DIR/pairing.pub" --yes-write-pairing-slot 2>&1)" || die "writing pairing slot $SLOT failed: $out"
+		log "pairing slot $SLOT written and read back"
+	fi
+	unit session test >/dev/null 2>&1 || die "the per-unit key does not open a session: nothing is restricted"
+	log "the per-unit key opens a session"
+	unit config restrict-shared --unit-slot "$SLOT" --out "$TMP/restricted.cfg" >/dev/null 2>&1 || die "cannot build the restricted configuration"
+	if unit config diff --in "$TMP/restricted.cfg" --check >/dev/null 2>&1; then
+		log "the shared key is already restricted; nothing to do"
+		return 0
+	fi
+	if [ "$W_CFG" = 0 ]; then
+		would "rewrite the R-config so that the shared key (slot 0) loses its rights (backup first, erase, write, read back, restart); needs --yes-rewrite-r-config"
+		return 0
+	fi
+	if [ -f "$BACKUP" ]; then
+		bk="$DIR/rconfig-before-$(date +%Y%m%dT%H%M%S 2>/dev/null || echo run).cfg"
+	else
+		bk="$BACKUP"
+	fi
+	out="$(unit config rewrite --in "$TMP/restricted.cfg" --yes-rewrite-r-config --backup "$bk" 2>&1)" || die "the R-config rewrite failed: $out (backup, if made: $bk)"
+	log "R-config rewritten and read back; backup: $bk"
+	"$TC" chip reboot >/dev/null 2>&1 || die "the chip could not be restarted; the new R-config takes effect at its next restart or power cycle"
+	if shared_refused && unit session test >/dev/null 2>&1 && unit config dump >/dev/null 2>&1; then
+		log "verified: the shared key is refused, the per-unit key works. Slot 0 is restricted, not invalidated."
+		return 0
+	fi
+	log "verification FAILED (the shared key is not refused, or the per-unit key lost access): restoring $bk"
+	if unit config restore --in "$bk" --yes-rewrite-r-config --backup "$DIR/rconfig-failed.cfg" >/dev/null 2>&1; then
+		"$TC" chip reboot >/dev/null 2>&1 || true
+		die "restored the previous configuration from $bk"
+	fi
+	die "verification failed AND the restore failed; the saved configuration is $bk: run: tropicctl --key unit config restore --in $bk --yes-rewrite-r-config"
+}
+
+cmd_undo() {
+	W_CFG=0
+	for a in "$@"; do
+		case "$a" in
+		--yes-rewrite-r-config) W_CFG=1 ;;
+		*) die "unknown option $a" ;;
+		esac
+	done
+	load_keys
+	[ -f "$BACKUP" ] || die "no saved configuration ($BACKUP): nothing to restore"
+	unit session test >/dev/null 2>&1 || die "the per-unit key does not open a session"
+	if [ "$W_CFG" = 0 ]; then
+		would "restore the saved configuration $BACKUP (backup, erase, write, read back, restart); needs --yes-rewrite-r-config"
+		return 0
+	fi
+	out="$(unit config restore --in "$BACKUP" --yes-rewrite-r-config --backup "$DIR/rconfig-before-undo.cfg" 2>&1)" || die "the restore failed: $out"
+	"$TC" chip reboot >/dev/null 2>&1 || die "restored, but the chip could not be restarted"
+	log "restored $BACKUP; the shared key has its rights again after the restart"
+}
+
+case "${1:-}" in
+status) shift; cmd_status "$@" ;;
+provision) shift; cmd_provision "$@" ;;
+undo) shift; cmd_undo "$@" ;;
+*) echo "usage: tropic01-pairing status | provision [--yes-write-pairing-slot] [--yes-rewrite-r-config] [--allow-old-firmware] | undo [--yes-rewrite-r-config]" >&2; exit 2 ;;
+esac

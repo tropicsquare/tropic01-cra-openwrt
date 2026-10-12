@@ -7,4 +7,6 @@
 - Never generate, commit or print production signing keys. Test keys go
   under a directory covered by `.gitignore`.
 - Do not describe TROPIC01 as the boot root of trust (see README).
-- Monotonic counter increments are also irreversible: confirm first.
+- Monotonic counter updates (each decrements by one) and `counter init`
+  change the chip: confirm first. `counter init` can be repeated, so the
+  design must keep that right away from any key an attacker can get.

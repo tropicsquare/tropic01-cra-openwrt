@@ -7,9 +7,9 @@ its default configuration has an empty endpoint, so on a fresh image it does not
 
 ## What it is meant to do
 
-Publish telemetry to AWS IoT Core over MQTT with mutual TLS, authenticating with the same TROPIC01-held key as the
-VPN: the private key stays in the chip and signs through the PKCS#11 module, and the device certificate is read from
-R-MEM. The client is built on the coreMQTT library.
+Publish telemetry to AWS IoT Core over MQTT with mutual TLS. AWS uses its own TROPIC01-held key in ECC slot 1, with
+its certificate in R-MEM slot 2; the VPN uses ECC slot 0. The private key stays in the chip and signs through the
+PKCS#11 module. The client is built on the coreMQTT library.
 
 ## What was observed
 
@@ -46,9 +46,11 @@ Nothing on the router can fix this; check the certificate status and the attache
 
 ## How to retest
 
-1. Register the certificate stored in R-MEM slot 1 (the one for ECC slot 0) in AWS IoT, activate it, and attach a policy
-   that allows `iot:Connect` and `iot:Publish` for your client ID and topic.
-2. Configure the unit:
+1. Run `tropic01-aws-provision`: it generates the key in ECC slot 1 and prints the public key for a certificate request.
+2. Register the certificate in AWS IoT, activate it, and attach a policy that allows `iot:Connect` and `iot:Publish`
+   for your client ID and topic. Store it in R-MEM slot 2: `tropicctl mem write 2 --in <cert.der>`.
+3. Copy `aws/AmazonRootCA1.pem` to `/etc/ssl/tropic01-aws/` (the package does not install it).
+4. Configure the unit:
 
    ```sh
    uci set tropic01-aws.main.endpoint=<your-endpoint>.iot.<region>.amazonaws.com
@@ -57,5 +59,5 @@ Nothing on the router can fix this; check the certificate status and the attache
    uci commit tropic01-aws
    ```
 
-3. Stop OpenVPN (it holds the chip), then publish once: `service tropic01-aws publish`, and read the result with
+5. Stop OpenVPN (it holds the chip), then publish once: `service tropic01-aws publish`, and read the result with
    `logread | grep tropic01-aws`.

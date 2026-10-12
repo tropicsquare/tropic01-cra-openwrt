@@ -34,7 +34,7 @@ accepted.
 | BL2 → FIP (TF-A) → U-Boot | MediaTek secure boot | ROTPK hash fused into the MT7981 SoC |
 | U-Boot → kernel/rootfs | FIT image signature check (`CONFIG_FIT_SIGNATURE`) | public key embedded in the verified U-Boot |
 | sysupgrade | signature check in the fwtool/sysupgrade path before flashing | same key |
-| anti-rollback | image carries a security version; install is refused if it is lower than a TROPIC01 monotonic counter, which is incremented after a successful upgrade | TROPIC01 monotonic counter |
+| anti-rollback | image carries a security version; install is refused if it is older than the version recorded in a TROPIC01 monotonic counter, which is decremented after a successful upgrade (counters only count down) | TROPIC01 monotonic counter |
 
 **TROPIC01 is not the boot root of trust** — the SoC boot ROM is. Keep
 docs and talk material consistent with that.

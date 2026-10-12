@@ -10,7 +10,7 @@ package (`make package PKG=pkcs11-test`) instead.
 
 | File | Purpose |
 |---|---|
-| `test-pkcs11-full.c` | Comprehensive PKCS#11 test: init, random, sign/verify |
+| `test-pkcs11-full.c` | PKCS#11 smoke test: init, slot list, session, random |
 | `test-pkcs11-info.c` | Module info query (Cryptoki version, manufacturer, …) |
 | `test-slot-list.c` | Slot enumeration |
 | `pkcs11-data.c` | R-MEM/ECC data operations reference (see `../docs/pkcs11-data-operations.md`) |

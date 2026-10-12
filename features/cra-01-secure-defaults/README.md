@@ -125,9 +125,10 @@ Today the script's only entropy source is `/dev/urandom` (the kernel
 CSPRNG, 128 bits — already a real improvement over any serial-derived
 formula). TROPIC01-sourced entropy is not implemented; the script logs
 that plainly on every run rather than implying it. Wiring an actual raw
-random pull from TROPIC01 needs a host-native `tropicctl`/`libtropic` build
-talking to the chip over USB or a host SPI adapter — see
-[libtropic](https://github.com/tropicsquare/libtropic) — which is future
+random pull from TROPIC01 on the build host needs either `libtropic`
+talking to its USB devkit, or `tropicctl` over a Linux SPI adapter
+(`tropicctl` has no USB support) — see
+[libtropic](https://github.com/tropicsquare/libtropic). That is future
 work, not a prerequisite for this credential to already be a real
 improvement over a derivable default.
 
@@ -256,6 +257,9 @@ next boot whatever the cause.
 
 The uci-defaults script cannot be tested without a router: it depends on
 `/lib/functions.sh` and UCI, neither of which exist on a build host. It
-was reviewed for logic and passes `make lint`; it has not been run on
-real hardware. Say so in any PR that touches it, and get an on-hardware
-test before merging into `main` (see `CONTRIBUTING.md`).
+was reviewed for logic and passes `make lint`. It runs at the first boot
+of every flashed image, and `bench.py web` checked its result on the final
+image (dropbear bound to `lan`, password login on). The WAN policy
+assertion, the switch to key-only SSH and the drift warnings were not
+checked on hardware. Say so in any PR that touches them, and get an
+on-hardware test before merging into `main` (see `CONTRIBUTING.md`).

@@ -60,8 +60,8 @@ image lands.
 
 **The requirement.** Annex I 2(d): every unit should authenticate to its
 own chip with its own secret, not a key anyone can look up
-(`003-use-engineering-sample-keys.patch` currently uses the published
-`ENGINEERING_SAMPLES_01` key for every unit built from this feed — see
+(an unprovisioned unit talks to its chip with the published slot-0 key,
+`es01` or `prod0` — see
 [`cra-04-access-control/README.md`](../../features/cra-04-access-control/README.md)).
 
 **The friction.** This is the *sharpest* version of the same tension.
@@ -72,13 +72,12 @@ key is exactly what makes "flash any unit, SSH in, `tropicctl info chip` just
 works" possible today. That convenience and Annex I 2(d) are in direct
 tension; there is no config flag that gets both.
 
-**What this repo does about it.** Nothing yet — cra-04 is explicitly
-"partial," and the README already refuses to claim otherwise. Flagging it
-here because it's the same shape of problem as the credential one above,
-just with a harder consequence (a bricked-feeling chip, not just a
-password prompt) and a genuinely harder fix (per-unit pairing keys need
-their own provisioning step, and slot-0 invalidation is irreversible —
-see that feature's `CLAUDE.md`).
+**What this repo does about it.** `tropic01-pairing` provisions a unit only
+when asked, and restricts slot 0 instead of invalidating it, so an
+unprovisioned dev unit still just works. The cost moves to provisioned units:
+their key lives in `/etc/tropic01/` (kept across `sysupgrade`, and so also in
+settings backups), and losing it locks the unit out of its own chip. Slot-0
+invalidation is still irreversible; see that feature's `CLAUDE.md`.
 
 ## `sysupgrade` config preservation doesn't cover everything you'd assume
 
@@ -102,11 +101,10 @@ convenience.
 
 ## Debug-build conveniences that must not reach anything resembling a release
 
-Not CRA-specific, but the same "quiet erosion" shape: `tropicctl` is built
-with `LT_PRINT_SPI_DATA=1` (raw SPI bus traffic to stdout) and
-`libtropic-pkcs11` carries syslog tracing
-(`006-add-syslog-tracing.patch`) — both genuinely useful while bringing
-up new hardware, both things you do not want logging chip traffic on a
-unit anyone else can read `logread` on. Tracked in the [CRA backlog](backlog.md), item 3.10; flagged here too since
+Not CRA-specific, but the same "quiet erosion" shape: `libtropic-pkcs11`
+carries syslog tracing (`006-add-syslog-tracing.patch`), useful while
+bringing up new hardware and unwanted on a unit anyone else can read
+`logread` on. (libtropic itself is built with `LT_LOG_LVL=None` and without
+raw SPI data printing.) Tracked in the [CRA backlog](backlog.md), item 3.10; flagged here too since
 it's the same category of problem — a dev-velocity aid with a real cost
 if it silently ships.

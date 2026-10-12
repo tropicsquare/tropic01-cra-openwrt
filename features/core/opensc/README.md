@@ -6,6 +6,10 @@ This package provides OpenSC tools for testing and working with PKCS#11 modules 
 
 OpenSC is an open-source project that provides a set of libraries and utilities for working with smart cards. This is a **minimal build** optimized for OpenWrt, specifically for testing PKCS#11 modules like libtropic-pkcs11.
 
+> **Status:** currently fails to build against OpenWrt's fortify headers
+> (`__orig_strlcpy is not a function`). It is not selected in
+> `openwrt.config`. Use [pkcs11-test](../pkcs11-test/README.md) instead.
+
 ## What's Included
 
 ### Tools
@@ -22,18 +26,14 @@ OpenSC is an open-source project that provides a set of libraries and utilities 
 This package is built **without PC/SC middleware dependencies** to reduce size and complexity. This is perfect for:
 - Testing external PKCS#11 modules (like libtropic-pkcs11)
 - Embedded systems with limited resources
-- USB-connected security tokens (like TROPIC01)
+- PKCS#11 modules for directly attached chips (TROPIC01 is on SPI)
 
 ## Building
 
 To include in your OpenWrt build:
 
 ```bash
-make menuconfig
-# Navigate to: Utilities -> opensc
-# Enable the package
-
-make package/opensc/compile V=s
+make package PKG=opensc
 ```
 
 ## Usage with libtropic-pkcs11
@@ -94,12 +94,6 @@ pkcs11-tool --module /usr/lib/libtropic_pkcs11.so \
 ### During Build
 The package will be included in your firmware if enabled in menuconfig.
 
-### Post-Installation
-```bash
-opkg update
-opkg install opensc
-```
-
 ## Package Size
 
 Approximate installed size: ~600KB (minimal build without PC/SC)
@@ -113,7 +107,6 @@ Approximate installed size: ~600KB (minimal build without PC/SC)
 
 - Works with any PKCS#11 v2.x module
 - No smart card reader required (when using external modules)
-- Tested with libtropic-pkcs11 on TROPIC01
 
 ## Source
 
@@ -135,8 +128,8 @@ The module is still functional for its specific hardware (like TROPIC01).
 
 ### Device permission denied
 ```bash
-chmod 666 /dev/ttyACM0
-# Or add user to dialout group
+chmod 666 /dev/spidev2.0
+chmod 666 /dev/gpiochip0
 ```
 
 ## Alternative: Manual Testing
@@ -146,9 +139,6 @@ If you prefer not to install opensc, you can test PKCS#11 modules using OpenSSL:
 ```bash
 # List available providers
 openssl list -providers
-
-# With proper configuration, use:
-openssl rand -engine pkcs11 32
 ```
 
 ## Support
