@@ -1,0 +1,39 @@
+From ec1f53fc12bec566d4a8b1cd0ff1978891f49b25 Mon Sep 17 00:00:00 2001
+From: kosmax871 <kosmax871@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 16:46:43 +0200
+Subject: [PATCH] image: add the TROPIC01 security version to the image
+ metadata
+
+The tropic01-cra-openwrt feed refuses a sysupgrade image whose security
+version is below the unit's rollback floor (feature cra-07, the floor is
+kept in a TROPIC01 monotonic counter). The security version has to be in
+the metadata that append-metadata writes, because that metadata is covered
+by the image signature.
+
+IMAGE_METADATA is reset for every device in Device/Init, so a value set on
+the make command line never reaches append-metadata. Seed it from
+TROPIC01_IMAGE_SV instead: unset, nothing changes; set to an integer, the
+metadata gains "tropic01_sv": N. A device recipe that sets IMAGE_METADATA
+itself still overrides it (the OpenWrt One does not).
+
+Signed-off-by: kosmax871 <kosmax871@users.noreply.github.com>
+---
+ include/image.mk | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/include/image.mk b/include/image.mk
+index 38005b2ab2..036a0677de 100644
+--- a/include/image.mk
++++ b/include/image.mk
+@@ -534,7 +534,7 @@ define Device/Init
+   DEVICE_COMPAT_VERSION := 1.0
+   DEVICE_COMPAT_MESSAGE :=
+   SUPPORTED_DEVICES := $(subst _,$(comma),$(1))
+-  IMAGE_METADATA :=
++  IMAGE_METADATA := $(if $(TROPIC01_IMAGE_SV),"tropic01_sv": $(TROPIC01_IMAGE_SV))
+ 
+   FILESYSTEMS := $(TARGET_FILESYSTEMS)
+ 
+-- 
+2.34.1
+

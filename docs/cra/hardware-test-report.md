@@ -257,4 +257,48 @@ was deleted, so no pairing slot is free; the R-config is the original.
 
 The bench unit (TROPIC01-ES) now has a per-unit pairing key in slot 1 and an owner key in slot 3, and its shared key is
 restricted to PING; the PKCS#11 module, the vault and the OpenVPN tunnel work with the per-unit key. This was done with
-tooling from the secure-update branch and is recorded in detail there. Slot 0 was not invalidated.
+tooling from the secure-update work and is recorded in detail below (least-privilege runtime key). Slot 0 was not invalidated.
+
+## cra-07 secure update on the spare chip (2026-10-11)
+
+Router: OpenWrt One with the spare TROPIC01 (S/N ...0358, firmware 2.2.0, production slot-0 key, `slot0-key` = `prod0`). Images
+built from `feat/secure-update` with `TROPIC01_SIGNING_DIR` (test root `ca41a5cdf31a46cd`, release key with a `ucert`
+certificate from it) and `TROPIC01_IMAGE_SV`, plus `tropic01-secure-update` in the image. OpenVPN stopped and checked by PID
+before every chip command.
+
+| Step | Result |
+|---|---|
+| Flash the signed SV 1 image (the old image had no check) | boots; hook, `ucert`, `tropic01-update`, keep-list entry and `/usr/share/tropic01/image-sv` = 1 present |
+| First boot commit, before provisioning | **found a bug:** with no `slot0-key` yet the counter could not be read, and `commit` went on with an empty floor and tried to count down (it failed only because the session failed too). Fixed: an unreadable floor stops `check` and `commit` with nothing changed; sandbox regression test (fails 6 checks on the old code) |
+| Provision (chip writes) | root public key stored in R-MEM slot 200 and read back; counter 0 initialised to 1000 (floor 0; the range is fixed from now on) |
+| `validate_firmware_image` (what `sysupgrade` and LuCI use), floor 0 | signed SV 2 and SV 1: valid; **unsigned**: invalid, not forceable ("no signature"); **tampered** (one byte changed, original signature kept): invalid, not forceable (fwtool's checksum on the metadata already fails); **signed under a foreign root**: invalid, not forceable ("does not lead to an update root key held in TROPIC01"); `sysupgrade -F -T`: "Image check failed" |
+| Real `sysupgrade` to SV 2 | the hook accepted it ("security version 2 (floor 0)"), settings kept, `slot0-key` survived (keep list) |
+| Boot commit | "rollback floor raised from 0 to 2"; counter 0 = **998** (exactly two steps) |
+| Rollback | SV 1 image at floor 2: invalid, **not forceable**, "refusing a rollback"; `sysupgrade -F -T`: "Image check failed"; SV 2 (same level) still valid |
+
+Not run on hardware: stopping and restarting OpenVPN around the check (this chip has no VPN key, so OpenVPN does not run; covered
+by the sandbox). Seen: the commit message is logged twice (stderr captured by procd plus `logger`), cosmetic. State left: the
+router runs the SV 2 image with enforcement on; R-MEM slot 200 holds the test root; counter 0 is 998 (floor 2). Further updates
+of this unit need images signed under that test root with SV >= 2 (keys kept outside the repository on the bench PC).
+
+## Least-privilege runtime key on the bench chip (cra-07 10.6, 2026-10-11)
+
+Old bench chip (TROPIC01-ES, S/N ...0014, firmware 0.1.2, ES01 shared key), in the router running the signed cra-07 image.
+Decisions: the runtime key keeps R-MEM write (the vault needs it), the owner key is offline, R-config only (reversible).
+OpenVPN stopped and checked by PID before chip commands.
+
+| Step | Result |
+|---|---|
+| Pairing slots (one way) | slot 1: runtime key (private half in `/etc/tropic01/`), slot 3: owner key (private half only on the bench PC); both written with the shared key, read back, and each opens a session. Slot 2 left free. |
+| Configuration | built offline with `tropicctl config deny`: key 0 (shared) keeps only PING, key 2 (empty slot) nothing, key 1 (runtime) loses counter init, R-config write/erase, I-config write, pairing write/invalidate, ECC generate/store/erase; applied with the owner key (backup first), chip restarted |
+| Runtime key refused (exit 5) | counter init, pairing write, ECC generate, and an R-config rewrite ("failed before anything was erased: LT_L3_UNAUTHORIZED"; the configuration is unchanged) |
+| Runtime key allowed | R-MEM read, ECC list, counter get, random, configuration read |
+| Shared key | opens a session (PING), refused for R-MEM and counter init |
+| Running system | vault init/write/lock/unlock/destroy with the runtime key; the PKCS#11 module uses the per-unit key (slot 1); OpenVPN tunnel up, "signature complete: 64 bytes produced by TROPIC01 hardware", 4 of 4 pings |
+| Reversible | the owner key restored the original configuration (the shared key could read R-MEM again), then applied the restriction again; the runtime key is again refused counter init |
+
+What this shows: on this chip, software holding only the runtime key (root on the router) can no longer lower a rollback floor,
+change the access rights, add a pairing key or create keys; it can still read and write R-MEM (by decision), so the update root
+key slots stay writable by it. State left: restricted configuration in force; backup `/etc/tropic01/rconfig-before-least-privilege.cfg`;
+OpenVPN stopped (it starts at the next boot). This bench unit now has a per-unit key and a restricted shared key: the cra-04 README's
+"no unit has been provisioned" no longer holds for it and is to be updated with the cra-04 branch.

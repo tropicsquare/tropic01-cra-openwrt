@@ -132,3 +132,37 @@ check "config restore works with such a key" 0 "$(rc --key unit config restore -
 echo "00000002 00000100" > chip/fw
 sed -i 's/^TR01_CFG_UAP_I_CONFIG_READ .*/TR01_CFG_UAP_I_CONFIG_READ 0xfffffff4/' chip/rconfig
 check "config burn without the right to read the I-config: exit 5" 5 "$(rc --key unit config burn UAP_PING 3 --yes-burn-i-config-bit)"
+
+echo "# config deny: least privilege for one pairing key (offline file edit)"
+fresh; setkey 1
+T --key unit config dump > cur.cfg 2>/dev/null
+check "deny counter init to key 1" 0 "$(rc config deny --in cur.cfg --out d1.cfg --pairing-key 1 MCOUNTER_INIT)"
+check_contains "prints the change" "TR01_CFG_UAP_MCOUNTER_INIT 0xffffffff -> 0xfdfdfdfd" "$(cat out.txt)"
+check "key 1 loses it in every counter group" "0xfdfdfdfd" "$(grep '^R TR01_CFG_UAP_MCOUNTER_INIT ' d1.cfg | awk '{print $3}')"
+check "other objects are unchanged" "0xffffffff" "$(grep '^R TR01_CFG_UAP_MCOUNTER_UPDATE ' d1.cfg | awk '{print $3}')"
+check "the file holds all 27 R lines and no I lines" "27 0" "$(grep -c '^R ' d1.cfg) $(grep -c '^I ' d1.cfg)"
+check "names may be lists and carry prefixes" 0 "$(rc config deny --in cur.cfg --out d2.cfg --pairing-key 1 UAP_PAIRING_KEY_WRITE,TR01_CFG_UAP_PAIRING_KEY_INVALIDATE I_CONFIG_WRITE)"
+check "single-target objects lose byte 0 only" "0xfffffffd" "$(grep '^R TR01_CFG_UAP_I_CONFIG_WRITE ' d2.cfg | awk '{print $3}')"
+check "all: key 3 loses every access object" 0 "$(rc config deny --in cur.cfg --out d3.cfg --pairing-key 3 all)"
+check "including ping" "0xfffffff7" "$(grep '^R TR01_CFG_UAP_PING ' d3.cfg | awk '{print $3}')"
+check "non-access objects are untouched" "$(grep '^R TR01_CFG_START_UP ' cur.cfg | awk '{print $3}')" "$(grep '^R TR01_CFG_START_UP ' d3.cfg | awk '{print $3}')"
+check "an unknown name is a usage error" 2 "$(rc config deny --in cur.cfg --out x.cfg --pairing-key 1 MCOUNTER_FOO)"
+check "a non-access object is refused" 2 "$(rc config deny --in cur.cfg --out x.cfg --pairing-key 1 START_UP)"
+check "--pairing-key is required" 2 "$(rc config deny --in cur.cfg --out x.cfg MCOUNTER_INIT)"
+grep -v MCOUNTER_INIT cur.cfg > short.cfg
+check "a name missing from the file: exit 6" 6 "$(rc config deny --in short.cfg --out x.cfg --pairing-key 1 MCOUNTER_INIT)"
+check "deny touches no chip (works with the chip down)" 0 "$(touch chip/down; rc config deny --in cur.cfg --out x.cfg --pairing-key 1 MCOUNTER_INIT; rm -f chip/down)"
+echo "# applied: the counter-init right removed from the unit key"
+T --key unit counter init 4 5 --yes-init-counter >/dev/null 2>&1
+check "applied with the unit key" 0 "$(rc --key unit config rewrite --in d1.cfg --yes-rewrite-r-config --backup bd1.cfg)"
+T chip reboot >/dev/null 2>&1
+check "after the restart the unit key may not initialise a counter: exit 5" 5 "$(rc --key unit counter init 4 9 --yes-init-counter)"
+check "and the floor counter is unchanged" "counter 4: 5" "$(T --key unit counter get 4 2>/dev/null)"
+check "it may still count down (the floor can still rise)" 0 "$(rc --key unit counter update 4 --yes-update-counter)"
+check "the shared key still may (it is not restricted here)" 0 "$(rc --key shared counter init 5 3 --yes-init-counter)"
+T --key unit config dump > cur2.cfg 2>/dev/null
+T config deny --in cur2.cfg --out lockout.cfg --pairing-key 1 R_CONFIG_WRITE_ERASE >/dev/null 2>&1
+check "taking the configuration right from the session's own key is refused by rewrite" 9 "$(rc --key unit config rewrite --in lockout.cfg --yes-rewrite-r-config --backup bd2.cfg)"
+check "but another key with the right may apply it" 0 "$(rc --key shared config rewrite --in lockout.cfg --yes-rewrite-r-config --backup bd3.cfg)"
+T chip reboot >/dev/null 2>&1
+check "then the unit key can no longer rewrite the configuration: exit 5" 5 "$(rc --key unit config rewrite --in bd1.cfg --yes-rewrite-r-config --backup bd4.cfg)"

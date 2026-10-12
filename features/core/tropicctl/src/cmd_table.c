@@ -119,6 +119,12 @@ const cmd_t g_cmds[] = {
      "access object except PING. Refuses unless pairing slot N holds a key and has the right to read and rewrite the "
      "configuration, so the restriction can be undone. Changes nothing on the chip; apply the file with config rewrite.",
      cmd_config_restrict_shared},
+    {"config", "deny", 'R', "--in FILE --out FILE --pairing-key K <object[,object...]|all>...", "Remove a pairing key from access objects in a config file",
+     "Offline: copies a configuration file and removes pairing key K from the named access objects (for example "
+     "MCOUNTER_INIT,R_CONFIG_WRITE_ERASE), in every group of targets; all names every access object. Prints each change. "
+     "Nothing on the chip changes; apply the file with config rewrite, which refuses a file that locks the session's key out "
+     "of the configuration.",
+     cmd_config_deny},
     {"config", "rewrite", 'H', "--in FILE --yes-rewrite-r-config [--backup FILE] [--include-non-access]", "Rewrite the R-config from a file",
      "HAZARDOUS. Validates the file, saves the current R-config to a backup, ERASES then writes the R-config, and reads it "
      "back. Writing without erasing can put the chip into permanent Alarm Mode, so this is the only way the tool writes it. "

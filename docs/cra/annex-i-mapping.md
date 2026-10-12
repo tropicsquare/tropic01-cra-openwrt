@@ -16,10 +16,11 @@ is how "secure by design" turns into "secure by checklist".
 | Feature | Annex I, Part I | What it covers | Status |
 |---|---|---|---|
 | [cra-01-secure-defaults](../../features/cra-01-secure-defaults/) | 2(b) | secure-by-default configuration, reset to original state | partial: attack-surface baseline + per-unit credential; reset integrity not started |
-| [cra-02-verified-boot](../../features/cra-02-verified-boot/) | 2(f), 2(c) | firmware integrity, rollback protection for security updates | not started |
+| [cra-02-verified-boot](../../features/cra-02-verified-boot/) | 2(f) | secure boot: the SoC and U-Boot check what they boot | not started; whether this board's boot ROM can verify a signature is still to be found out |
 | [cra-03-key-storage](../../features/cra-03-key-storage/) | 2(e) | confidentiality of stored and transmitted data | done for OpenVPN: the key is generated and used inside TROPIC01, verified on hardware including the boot-time start; AWS IoT telemetry is moved to the backlog (3.1) and not claimed |
 | [cra-04-access-control](../../features/cra-04-access-control/) | 2(d) | authentication, identity, access control | partial: per-device identity done; `tropic01-pairing` provisions a per-unit key and restricts the shared key (bench unit and a spare chip); slot 0 is not invalidated, other units still use the shared key |
 | [cra-05-secure-erase](../../features/cra-05-secure-erase/) | 2(m) | secure removal of user data and settings | partial: a small encrypted vault with a TROPIC01-held key and crypto-erase (verified on hardware); the rest of the overlay is not encrypted |
+| [cra-07-secure-update](../../features/cra-07-secure-update/) | 2(c), 2(f) | signed sysupgrade, rollback protection | in progress: works end to end on a router with a spare chip; not in the default image |
 | [cra-06-security-logging](../../features/cra-06-security-logging/) | 2(l) | security logging with a user opt-out | partial: event log, change audit and opt-out; not tamper-proof, no TROPIC01 involvement |
 
 What is still open, feature by feature, is in [backlog.md](backlog.md).
@@ -35,6 +36,7 @@ What is still open, feature by feature, is in [backlog.md](backlog.md).
 | cra-04 | central, unfinished: pairing keys and access policy decide who may talk to the chip |
 | cra-05 | central: random vault key, key storage in R-MEM slot 100, crypto-erase by erasing that slot |
 | cra-06 | none today; possible future anchoring of log hashes |
+| cra-07 | central for storage and state: update root public keys in R-MEM, rollback floor in a monotonic counter; it does **not** verify signatures (`ucert` does) |
 
 `core/` is not a CRA feature: it is the TROPIC01 platform layer (libtropic,
 the PKCS#11 module, `tropicctl`) that the features build on.

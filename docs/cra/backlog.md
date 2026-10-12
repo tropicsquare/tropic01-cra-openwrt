@@ -65,11 +65,8 @@ Annex I 2(f), 2(c). Design is in [cra-02's README](../../features/cra-02-verifie
 - **2.1 Secure boot chain** (BL2 to FIP to U-Boot, FIT image signature). The root of trust
   is the SoC boot ROM and its fused key, not TROPIC01. **Irreversible:** eFuse
   programming. Test with non-production keys on a spare board first. *L.*
-- **2.2 Signed sysupgrade** with the vendor key (today `sysupgrade -T` checks OpenWrt's
-  build key). *M.*
-- **2.3 Anti-rollback** with a TROPIC01 monotonic counter checked before an older signed
-  image is accepted. **Irreversible per step:** a counter only counts down, but `counter init` can be repeated, so it
-  protects only once no obtainable key keeps the init right. Needs 2.1. *M.*
+- **2.2 Signed sysupgrade** and **2.3 anti-rollback** moved to their own feature, cra-07-secure-update (section 10).
+  Secure boot (2.1) stays here; first find out whether this board's boot ROM can verify a signature at all.
 - **2.4 Signed recovery image in the write-protected SPI-NOR** as the base for verified
   reset. *M.*
 
@@ -290,6 +287,30 @@ destroy). Only `/vault` is encrypted.
   HTTPS. Needs 6.1 (a password must exist before the page does anything). It also widens the
   attack surface of an image that already ships LuCI, which the cra-01 README should say.
   *L.*
+
+## 10. cra-07 secure update (in progress)
+
+Annex I 2(c), 2(f) for the update path. Design: [cra-07 design](../../features/cra-07-secure-update/docs/design.md).
+
+- **10.1 Router side.** *Done in the sandbox:* `tropic01-update` and the sysupgrade hook (signature chain to a root key in
+  R-MEM, security version against the counter floor, refusal not forceable, commit at boot); 66 checks with 10.2. *S.*
+- **10.2 Build side.** *Done:* OpenWrt patch 0003 (`tropic01_sv` in the signed metadata), the harness step
+  (`TROPIC01_SIGNING_DIR`, `TROPIC01_IMAGE_SV`; nothing left behind when unset), the running image's security version in the
+  root filesystem, and the host tool `tropic01-update-keys.sh`. Docker builds do not pass the signing directory in yet. *M.*
+- **10.3 Spare chip.** *Done 2026-10-11 (hardware report):* root key in R-MEM, counter initialised, signed images accepted,
+  unsigned, tampered, foreign-root and rolled-back images refused and not forceable, floor raised by exactly the right steps
+  after boot. Open: the OpenVPN stop and restart around the check on a unit that runs OpenVPN; the commit message is logged
+  twice. *S.*
+- **10.4 Certificate validity and the clock.** `ucert` certificates expire (one year by default); the router's clock is wrong
+  until NTP. Decide the validity policy. *S.*
+- **10.5 Revocation.** How `ucert -R` records a revoked release key, and keeping that state in the chip. *S-M.*
+- **10.6 Narrow who may write the root key slots and initialise the counter** (cra-04 key split, then optionally I-config).
+  *Done on the bench chip, reversible (hardware report, 2026-10-11):* runtime key in slot 1 without counter init,
+  configuration, pairing or ECC-creation rights; offline owner key in slot 3; shared key PING only. Decided: the runtime key keeps
+  R-MEM write (so the root key slots stay writable by it). Open: a provisioning tool for this profile (fold into
+  `tropic01-pairing`), and the permanent I-config variant (separate decision). *M.*
+- **10.7 Release key inside a TROPIC01 on the build side.** *M.*
+- **10.8 CI.** Build OpenWrt's `usign`, `ucert` and `fwtool` in CI so `secure-update.sh` runs there instead of skipping. *S.*
 
 ## Decisions already taken
 

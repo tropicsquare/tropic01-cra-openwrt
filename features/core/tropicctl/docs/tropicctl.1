@@ -180,6 +180,11 @@ print the version / this help
 .br
 [R] Build a config file that takes the shared key's rights away. Reads the chip's current R\-config and writes a copy with pairing key 0 (the shared engineering key) removed from every access object except PING. Refuses unless pairing slot N holds a key and has the right to read and rewrite the configuration, so the restriction can be undone. Changes nothing on the chip; apply the file with config rewrite.
 .TP
+.B config deny
+\-\-in FILE \-\-out FILE \-\-pairing\-key K <object[,object...]|all>...
+.br
+[R] Remove a pairing key from access objects in a config file. Offline: copies a configuration file and removes pairing key K from the named access objects (for example MCOUNTER_INIT,R_CONFIG_WRITE_ERASE), in every group of targets; all names every access object. Prints each change. Nothing on the chip changes; apply the file with config rewrite, which refuses a file that locks the session's key out of the configuration.
+.TP
 .B config rewrite
 \-\-in FILE \-\-yes\-rewrite\-r\-config [\-\-backup FILE] [\-\-include\-non\-access]
 .br

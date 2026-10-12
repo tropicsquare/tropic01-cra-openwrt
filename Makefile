@@ -11,7 +11,7 @@ JOBS ?= $(shell nproc)
 IMAGE_DIR := $(OPENWRT_DIR)/bin/targets/mediatek/filogic
 DOCKER_IMAGE ?= tropic01-cra-openwrt-builder
 
-export OPENWRT_DIR DL_DIR
+export OPENWRT_DIR DL_DIR TROPIC01_SIGNING_DIR TROPIC01_IMAGE_SV
 
 .DEFAULT_GOAL := build
 .PHONY: help prepare build menuconfig savedefconfig package lint \
@@ -31,6 +31,8 @@ help:
 	@echo "  distclean      remove build/ entirely"
 	@echo ""
 	@echo "Variables: OPENWRT_DIR=$(OPENWRT_DIR) JOBS=$(JOBS) DL_DIR=<shared download cache>"
+	@echo "  TROPIC01_SIGNING_DIR=<dir with key-build and key-build.ucert>  sign the image (cra-07)"
+	@echo "  TROPIC01_IMAGE_SV=<n>  the image's security version (cra-07 rollback floor)"
 
 prepare:
 	./scripts/prepare.sh

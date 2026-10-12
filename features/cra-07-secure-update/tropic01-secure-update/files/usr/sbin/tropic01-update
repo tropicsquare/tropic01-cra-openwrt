@@ -1,0 +1,219 @@
+#!/bin/sh
+# tropic01-update -- signed sysupgrade images with a trust root in TROPIC01 and a rollback floor in a TROPIC01 counter.
+#
+#   tropic01-update status
+#   tropic01-update check IMAGE           what sysupgrade runs before anything is written (exit 0 = accept)
+#   tropic01-update commit                at boot: raise the rollback floor to the running image's security version
+#   tropic01-update keys list
+#   tropic01-update keys install SLOT FILE --yes-write-update-key [--replace]
+#   tropic01-update floor init --yes-init-rollback-counter
+#
+# The root public keys (usign format) live in TROPIC01 R-MEM slots (default 200 and 201). An image is accepted only if its
+# ucert chain leads to one of them, and its signed metadata carries a security version ("tropic01_sv") that is not below
+# the floor. floor = START - counter value: the counter only goes down, so the floor only goes up. TROPIC01 stores the keys
+# and the counter; the signature is checked by ucert here. See features/cra-07-secure-update/docs/design.md.
+
+set -eu
+umask 077
+
+TC="${TROPIC01_UPDATE_TROPICCTL:-tropicctl}"
+IMAGE_SV_FILE="${TROPIC01_UPDATE_IMAGE_SV:-/usr/share/tropic01/image-sv}"
+OPENVPN_INIT="${TROPIC01_UPDATE_OPENVPN_INIT:-/etc/init.d/openvpn}"
+
+uci_get() { uci -q get "tropic01-update.main.$1" 2>/dev/null || echo "$2"; }
+SLOTS="${TROPIC01_UPDATE_SLOTS:-$(uci_get key_slots '200 201')}"
+COUNTER="${TROPIC01_UPDATE_COUNTER:-$(uci_get counter 0)}"
+START="${TROPIC01_UPDATE_START:-$(uci_get start 1000)}"
+ENFORCE="${TROPIC01_UPDATE_ENFORCE:-$(uci_get enforce 1)}"
+
+log() { echo "tropic01-update: $*" >&2; logger -t tropic01-update "$*" 2>/dev/null || true; }
+die() { log "ERROR: $*"; exit 1; }
+
+TMP="$(mktemp -d)"
+OPENVPN_STOPPED=0
+cleanup() {
+	rm -rf "$TMP"
+	if [ "$OPENVPN_STOPPED" = 1 ]; then "$OPENVPN_INIT" start >/dev/null 2>&1 || true; fi
+}
+trap cleanup EXIT
+trap 'exit 1' INT TERM
+
+is_number() { case "$1" in "" | *[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+is_number "$COUNTER" && [ "$COUNTER" -le 15 ] || die "counter must be 0 to 15 (got '$COUNTER')"
+is_number "$START" && [ "$START" -ge 1 ] && [ "$START" -le 4294967294 ] || die "start must be 1 to 4294967294 (got '$START')"
+
+# The PKCS#11 module keeps a session open while OpenVPN runs; one session at a time, so stop it while we use the chip.
+free_chip() {
+	if [ -x "$OPENVPN_INIT" ] && pidof openvpn >/dev/null 2>&1; then
+		"$OPENVPN_INIT" stop >/dev/null 2>&1 || true
+		OPENVPN_STOPPED=1
+		sleep 2
+	fi
+}
+
+# chip ARGS...: tropicctl, retried while the chip is busy (exit 3); returns tropicctl's exit code
+# (POSIX sh has no local variables: the helpers use names of their own, prefixed with _, so they never clobber a caller's)
+chip() {
+	_try=0
+	while :; do
+		_rc=0
+		"$TC" "$@" >"$TMP/chip.out" 2>"$TMP/chip.err" || _rc=$?
+		[ "$_rc" -ne 3 ] && return "$_rc"
+		_try=$((_try + 1))
+		[ "$_try" -ge 5 ] && return 3
+		sleep 2
+	done
+}
+
+# Copy the root public keys from the chip into directory $1, one file per key, named by its usign fingerprint.
+# Prints how many keys were found. A chip error is not "no key": it fails.
+export_keys() {
+	n=0
+	for s in $SLOTS; do
+		rc=0
+		chip mem read "$s" --out "$TMP/k.$s" || rc=$?
+		case "$rc" in
+		0) ;;
+		6) continue ;;
+		*) die "cannot read update key slot $s from TROPIC01 (tropicctl exit $rc): $(cat "$TMP/chip.err")" ;;
+		esac
+		fp="$(usign -F -p "$TMP/k.$s" 2>/dev/null)" || die "R-MEM slot $s does not hold a usign public key"
+		cp "$TMP/k.$s" "$1/$fp"
+		n=$((n + 1))
+	done
+	echo "$n"
+}
+
+# the rollback floor (START - counter); exit 6 from tropicctl means the counter was never initialised
+floor_value() {
+	rc=0
+	chip counter get "$COUNTER" || rc=$?
+	[ "$rc" -eq 6 ] && return 6
+	[ "$rc" -eq 0 ] || die "cannot read rollback counter $COUNTER (tropicctl exit $rc): $(cat "$TMP/chip.err")"
+	c="$(sed -n 's/^counter [0-9]*: \([0-9]*\)$/\1/p' "$TMP/chip.out")"
+	is_number "$c" || die "unexpected counter output: $(cat "$TMP/chip.out")"
+	echo $((START - c))
+}
+
+meta_sv() { sed -n 's/.*"tropic01_sv"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$1" | head -n 1; }
+
+cmd_check() {
+	img="${1:?usage: tropic01-update check IMAGE}"
+	[ -f "$img" ] || die "no image $img"
+	if [ "$ENFORCE" != 1 ]; then
+		log "WARNING: enforcement is off (tropic01-update.main.enforce); the image is NOT checked"
+		return 0
+	fi
+	for t in fwtool ucert usign; do command -v "$t" >/dev/null 2>&1 || die "$t is missing: cannot check the image"; done
+	fwtool -q -s "$TMP/image.ucert" "$img" 2>/dev/null || die "the image carries no signature"
+	fwtool -q -i "$TMP/image.meta" "$img" 2>/dev/null || die "the image carries no metadata"
+	sv="$(meta_sv "$TMP/image.meta")"
+	is_number "$sv" || die "the image's signed metadata has no security version (tropic01_sv)"
+	free_chip
+	mkdir "$TMP/keys"
+	n="$(export_keys "$TMP/keys")"
+	[ "$n" -gt 0 ] || die "no update root key in TROPIC01 (slots $SLOTS): provision one first"
+	fwtool -q -T -s /dev/null "$img" | ucert -V -q -m - -c "$TMP/image.ucert" -P "$TMP/keys" ||
+		die "the image signature does not lead to an update root key held in TROPIC01"
+	rc=0
+	floor="$(floor_value)" || rc=$?
+	[ "$rc" -eq 6 ] && die "rollback counter $COUNTER is not initialised: run tropic01-update floor init first"
+	if [ "$rc" -ne 0 ] || ! is_number "$floor"; then die "cannot read the rollback floor (counter $COUNTER)"; fi
+	[ "$sv" -ge "$floor" ] || die "security version $sv is below this unit's floor $floor: refusing a rollback"
+	log "accepted: signed by a root held in TROPIC01, security version $sv (floor $floor)"
+}
+
+cmd_commit() {
+	[ -f "$IMAGE_SV_FILE" ] || { log "the running image has no security version ($IMAGE_SV_FILE); nothing to commit"; return 0; }
+	sv="$(tr -d ' \n' < "$IMAGE_SV_FILE")"
+	is_number "$sv" || die "bad security version in $IMAGE_SV_FILE"
+	free_chip
+	rc=0
+	floor="$(floor_value)" || rc=$?
+	[ "$rc" -eq 6 ] && { log "rollback counter $COUNTER is not initialised; nothing to commit"; return 0; }
+	# never count down on a floor that could not be read: an empty value would make every step a decrement
+	if [ "$rc" -ne 0 ] || ! is_number "$floor"; then die "cannot read the rollback floor (counter $COUNTER); nothing changed"; fi
+	[ "$sv" -le "$floor" ] && { log "floor $floor, running image $sv: nothing to raise"; return 0; }
+	[ "$sv" -le "$START" ] || die "security version $sv is above the counter's range (start $START)"
+	steps=$((sv - floor))
+	done_steps=0
+	while [ "$done_steps" -lt "$steps" ]; do
+		chip counter update "$COUNTER" --yes-update-counter || die "counter update failed after raising the floor by $done_steps: $(cat "$TMP/chip.err")"
+		done_steps=$((done_steps + 1))
+	done
+	log "rollback floor raised from $floor to $sv"
+}
+
+cmd_status() {
+	log "enforce: $ENFORCE, key slots: $SLOTS, counter: $COUNTER, start: $START"
+	if [ -f "$IMAGE_SV_FILE" ]; then log "running image security version: $(cat "$IMAGE_SV_FILE")"; else log "running image security version: none"; fi
+	free_chip
+	for s in $SLOTS; do
+		rc=0
+		chip mem read "$s" --out "$TMP/k.$s" || rc=$?
+		case "$rc" in
+		0) log "slot $s: key $(usign -F -p "$TMP/k.$s" 2>/dev/null || echo '(not a usign public key)')" ;;
+		6) log "slot $s: empty" ;;
+		*) log "slot $s: cannot read (tropicctl exit $rc)" ;;
+		esac
+	done
+	rc=0
+	floor="$(floor_value)" || rc=$?
+	if [ "$rc" -eq 6 ]; then log "rollback floor: counter not initialised"; else log "rollback floor: $floor"; fi
+}
+
+cmd_keys() {
+	case "${1:-}" in
+	list) cmd_status ;;
+	install)
+		slot="${2:-}" file="${3:-}"
+		shift 3 2>/dev/null || die "usage: tropic01-update keys install SLOT FILE --yes-write-update-key [--replace]"
+		yes=0 replace=0
+		for a in "$@"; do
+			case "$a" in
+			--yes-write-update-key) yes=1 ;;
+			--replace) replace=1 ;;
+			*) die "unknown option $a" ;;
+			esac
+		done
+		case " $SLOTS " in *" $slot "*) ;; *) die "slot $slot is not one of the update key slots ($SLOTS)" ;; esac
+		[ -f "$file" ] || die "no file $file"
+		fp="$(usign -F -p "$file" 2>/dev/null)" || die "$file is not a usign public key"
+		[ "$(wc -c < "$file" | tr -d ' ')" -le 475 ] || die "$file is larger than an R-MEM slot (475 bytes)"
+		[ "$yes" = 1 ] || { log "DRY RUN (nothing written): would store key $fp in R-MEM slot $slot; needs --yes-write-update-key"; return 0; }
+		free_chip
+		set -- mem write "$slot" --in "$file"
+		[ "$replace" = 1 ] && set -- "$@" --replace
+		rc=0
+		chip "$@" || rc=$?
+		[ "$rc" -eq 7 ] && die "slot $slot already holds data; add --replace to overwrite it"
+		[ "$rc" -eq 0 ] || die "writing slot $slot failed: $(cat "$TMP/chip.err")"
+		log "update root key $fp stored in R-MEM slot $slot and read back"
+		;;
+	*) die "usage: tropic01-update keys list | install SLOT FILE --yes-write-update-key [--replace]" ;;
+	esac
+}
+
+cmd_floor() {
+	case "${1:-}" in
+	init)
+		[ "${2:-}" = "--yes-init-rollback-counter" ] || { log "DRY RUN (nothing written): would set counter $COUNTER to $START (floor 0); needs --yes-init-rollback-counter"; return 0; }
+		free_chip
+		rc=0
+		floor_value >/dev/null || rc=$?
+		[ "$rc" -eq 6 ] || die "counter $COUNTER is already initialised; setting it again would lower the floor (use tropicctl directly if that is really meant)"
+		chip counter init "$COUNTER" "$START" --yes-init-counter || die "counter init failed: $(cat "$TMP/chip.err")"
+		log "rollback counter $COUNTER set to $START: floor 0"
+		;;
+	*) die "usage: tropic01-update floor init --yes-init-rollback-counter" ;;
+	esac
+}
+
+case "${1:-}" in
+status) cmd_status ;;
+check) shift; cmd_check "$@" ;;
+commit) cmd_commit ;;
+keys) shift; cmd_keys "$@" ;;
+floor) shift; cmd_floor "$@" ;;
+*) echo "usage: tropic01-update status | check IMAGE | commit | keys list | keys install SLOT FILE --yes-write-update-key [--replace] | floor init --yes-init-rollback-counter" >&2; exit 2 ;;
+esac

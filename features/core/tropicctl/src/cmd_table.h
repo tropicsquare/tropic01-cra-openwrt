@@ -52,6 +52,7 @@ int cmd_pairing_invalidate(ctx_t *x, args_t *a);
 int cmd_config_get(ctx_t *x, args_t *a);
 int cmd_config_diff(ctx_t *x, args_t *a);
 int cmd_config_restrict_shared(ctx_t *x, args_t *a);
+int cmd_config_deny(ctx_t *x, args_t *a);
 int cmd_config_rewrite(ctx_t *x, args_t *a);
 int cmd_config_restore(ctx_t *x, args_t *a);
 int cmd_config_burn(ctx_t *x, args_t *a);

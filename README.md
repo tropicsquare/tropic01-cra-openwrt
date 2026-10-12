@@ -32,35 +32,58 @@ Each row is a folder under [`features/`](features/) with its own README.
 
 | Feature | CRA Annex I | What it does | Role of TROPIC01 | Status |
 |---|---|---|---|---|
-| [core](features/core/) | n/a | the chip's software layer: `libtropic`, a PKCS#11 module, the `tropicctl` tool | the interface to the chip | working |
+| [core](features/core/) | n/a | the chip's software layer: `libtropic`, a PKCS#11 module, the `tropicctl` tool | the interface to the chip | working; every `tropicctl` command except `pairing invalidate` run on a chip |
 | [cra-01-secure-defaults](features/cra-01-secure-defaults/) | 2(b) secure by default | closed WAN, SSH on the LAN only, a root password is forced before any shell, empty passwords are refused | **none today** (policy and configuration) | partial |
-| [cra-02-verified-boot](features/cra-02-verified-boot/) | 2(f), 2(c) integrity, rollback | signed boot and anti-rollback | planned: a monotonic counter for anti-rollback. It is **not** the boot root of trust | not started |
+| [cra-02-verified-boot](features/cra-02-verified-boot/) | 2(f) secure boot | the SoC and U-Boot check what they boot | **none:** it is **not** the boot root of trust | not started; whether this board's boot ROM can verify a signature is still to be found out |
 | [cra-03-key-storage](features/cra-03-key-storage/) | 2(e) confidentiality | OpenVPN client whose private key lives in the chip | **central:** generates the key, signs inside the chip, stores the certificate | done for OpenVPN |
 | [cra-04-access-control](features/cra-04-access-control/) | 2(d) authentication | per-unit keys for talking to the chip | **central:** pairing keys and access privileges | partial: per-unit key on the bench unit and a spare chip; slot 0 restricted, not invalidated |
 | [cra-05-secure-erase](features/cra-05-secure-erase/) | 2(m) secure data removal | an encrypted vault that can be destroyed cryptographically | **central:** random key and key storage, erased on destroy | partial: one folder, not the whole disk |
 | [cra-06-security-logging](features/cra-06-security-logging/) | 2(l) logging with opt-out | a security event log and a change audit | **none today** (a signed log is on the backlog) | partial |
+| [cra-07-secure-update](features/cra-07-secure-update/) | 2(c), 2(f) signed updates, rollback | signed `sysupgrade`, root key and rollback floor in TROPIC01 | in progress: verified on a router with a spare chip; not in the default image |
 
 What is still open, with dependencies and order, is in the [CRA backlog](docs/cra/backlog.md). The
 requirement-by-requirement analysis is in [docs/cra/annex-i-mapping.md](docs/cra/annex-i-mapping.md).
 
 ### Status at a glance
 
-Tested on a real OpenWrt One with a TROPIC01 engineering sample (see the
-[hardware test report](docs/cra/hardware-test-report.md)): forced first password, the boot-time guard,
-the OpenVPN tunnel with the key in the chip (including key generation, a chip-signed certificate request
-and storing the certificate), the encrypted vault and its crypto-erase, and the security log.
+**Done and tested on a real OpenWrt One** (details and dates in the
+[hardware test report](docs/cra/hardware-test-report.md)), with a TROPIC01 engineering sample and a second chip with
+production provisioning:
 
-**Not done, and said plainly:** verified boot and rollback protection (cra-02); per-unit chip pairing keys
-are provisioned only on one bench unit and a spare chip (slot 0 restricted there, not invalidated), so on any other unit
-the shared key still works;
-only the vault folder is encrypted, not the whole device; AWS IoT telemetry does not work; and on a unit
-with no password set, the first person on the LAN can choose it through the web UI.
+- the forced first password and the boot-time guard (cra-01);
+- the OpenVPN tunnel with its key in the chip, including key generation, a chip-signed certificate request and storing
+  the certificate (cra-03), re-verified on a clean rebuild in October 2026;
+- the encrypted vault and its crypto-erase (cra-05), re-verified on the same rebuild;
+- the security log and change audit (cra-06);
+- a per-unit pairing key written to the chip and the shared key's rights taken away (`tropic01-pairing`, cra-04);
+- every `tropicctl` command that writes the chip except `pairing invalidate`: ECC keys, R-MEM, pairing write,
+  configuration rewrite, MAC-and-Destroy PIN, counters, an I-config bit, and a chip firmware update;
+- signed updates with a rollback floor (cra-07) on a unit provisioned for them: signed images accepted, unsigned, tampered,
+  foreign and older images refused even with `sysupgrade -F`, the floor raised after boot;
+- a least-privilege runtime key on the bench chip: it can no longer initialise counters, change access rights, add
+  pairing keys or create keys, while the vault and the VPN still work (an offline owner key can undo it).
+
+**Not done, and said plainly:**
+
+- **Updates are not authenticated in the default image.** There `sysupgrade` accepts any structurally valid image: the
+  OpenWrt One check verifies the image's hashes, not who made it, and the signature check passes because `ucert` is not
+  in the image. cra-07 adds signed updates with a rollback floor in TROPIC01, but it is not in the default image: a unit
+  first needs an update root key in its chip and an initialised counter.
+- **No secure boot** (cra-02). Whether this board's boot ROM can verify a signature at all is still to be found out.
+- **Per-unit chip pairing keys** are provisioned only on one bench unit and a spare chip; every other unit still talks
+  to its chip with the published shared key. Slot 0 is restricted on provisioned units, never invalidated.
+- **Only the vault folder is encrypted**, not the whole device.
+- **AWS IoT telemetry does not work.**
+- **On a unit with no password set,** the first person on the LAN can choose it through the web UI.
+- The PKCS#11 module does not take `tropicctl`'s chip lock, so the two must not use the chip at the same time (the
+  scripts stop OpenVPN around their chip access).
 
 ## What you need
 
 - **Board:** an OpenWrt One (MediaTek MT7981B, Cortex-A53).
 - **Secure element:** a TROPIC01 on a MikroE Click board in the board's mikroBUS socket (SPI
-  `/dev/spidev2.0` at 1 MHz, chip select on GPIO 25). A TROPIC01 USB dongle also works.
+  `/dev/spidev2.0` at 1 MHz, chip select on GPIO 25). Only this SPI connection is supported. An engineering sample
+  works as it is; a chip with production provisioning needs `echo prod0 > /etc/tropic01/slot0-key` on the router.
 - **Cables:** USB-C for power, a second USB-C to the board's **debug port** (the serial console), and an
   Ethernet cable.
 - **A build host:** Linux with the [OpenWrt build dependencies](https://openwrt.org/docs/guide-developer/toolchain/install-buildsystem),
@@ -91,6 +114,12 @@ changes the configuration, `make DL_DIR=~/openwrt-dl` shares a download cache, `
 run the checks that need no board. Never edit `build/openwrt` by hand: it is regenerated from this repository
 ([how it is organised](#how-the-repository-is-organised)).
 
+**Signed images (cra-07).** `make build TROPIC01_SIGNING_DIR=<dir> TROPIC01_IMAGE_SV=<n>` signs the image with the release
+key in `<dir>` (`key-build`, `key-build.ucert`, made by
+`features/cra-07-secure-update/host-tools/tropic01-update-keys.sh`, kept outside any repository) and stamps it with security
+version `<n>`. Without these variables the image is unsigned, as before. See
+[cra-07-secure-update](features/cra-07-secure-update/).
+
 ## 2. Flash
 
 From a unit that already runs OpenWrt (SSH or the serial console):
@@ -98,7 +127,7 @@ From a unit that already runs OpenWrt (SSH or the serial console):
 ```sh
 scp -O openwrt-mediatek-filogic-openwrt_one-squashfs-sysupgrade.itb root@192.168.1.1:/tmp/fw.itb
 ssh root@192.168.1.1 sha256sum /tmp/fw.itb        # compare with sha256sums
-ssh root@192.168.1.1 sysupgrade -T /tmp/fw.itb    # test: "Signature check OK"
+ssh root@192.168.1.1 sysupgrade -T /tmp/fw.itb    # test the image format (it does not check who made it)
 ssh root@192.168.1.1 sysupgrade -n -v /tmp/fw.itb # flash, discarding old settings
 ```
 
@@ -157,6 +186,8 @@ Check the chip first: `tropicctl info chip` prints its identification. It must n
 | connect the router to a VPN with a key that never leaves the chip | follow the [OpenVPN user guide](features/cra-03-key-storage/docs/openvpn-user-guide.md) (generate the key, make a certificate request, get it signed, install the profile); `host-tools/tropic01-install-ovpn.sh` does the install step |
 | keep some data in an encrypted vault that can be destroyed | `tropic01-vault init` (writes R-MEM slot 100), data in `/vault`, `tropic01-vault destroy --yes-destroy-vault` to erase the key and the image. See [cra-05](features/cra-05-secure-erase/) |
 | see or switch off the security log | `tropic01-security-log status \| show \| disable \| enable \| clear`. See [cra-06](features/cra-06-security-logging/) |
+| use a chip with production provisioning | `echo prod0 > /etc/tropic01/slot0-key` (an engineering sample needs nothing). `tropicctl session test` tells you whether the key fits |
+| see or update the chip firmware | `tropicctl fw status`; `tropicctl fw update --dir <images> --yes-update-firmware` cannot be undone (see [tropicctl](features/core/tropicctl/README.md)) |
 | make a per-unit chip pairing key | `features/cra-04-access-control/host-tools/tropic01-gen-pairing-key.sh`. It only generates files; nothing is written to the chip. See [cra-04](features/cra-04-access-control/) |
 | put the per-unit key on the chip and take the shared key's rights away | `tropic01-pairing status`, then `tropic01-pairing provision --yes-write-pairing-slot --yes-rewrite-r-config` (`undo` restores the old access rights). The slot write is one way. See [cra-04](features/cra-04-access-control/) |
 | bake a unique root password into an image | `features/cra-01-secure-defaults/host-tools/tropic01-gen-credential.sh`. See [cra-01](features/cra-01-secure-defaults/) |
@@ -187,7 +218,7 @@ If you work with an AI agent, it is instructed to stop and ask before each of th
 ```sh
 make lint          # shellcheck on every shell script
 make test          # sandbox checks and the tropicctl tests, against fake hardware, no board needed
-python3 tests/hardware/bench.py suite   # the real-board suite: needs a board, see tests/hardware/README.md
+python3 tests/hardware/bench.py suite   # the real-board suite: needs a board that is not provisioned, see tests/hardware/README.md
 ```
 
 ## How the repository is organised
